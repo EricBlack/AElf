@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using AElf.Common;
+using AElf.Contracts.Consensus.DPoS;
 using AElf.Contracts.Genesis;
+using AElf.Contracts.Resource;
+using AElf.Contracts.Resource.FeeReceiver;
+using AElf.Contracts.Token;
 using AElf.Kernel;
 using AElf.Kernel.KernelAccount;
 using AElf.Kernel.Node.Application;
@@ -20,7 +24,10 @@ namespace AElf.Launcher
         {
             var transactions = new List<Transaction>();
             transactions.Add(GetTransactionForDeployment(chainId, typeof(BasicContractZero)));
-            transactions.Add(GetTransactionForDeployment(chainId, typeof(AElf.Contracts.Consensus.DPoS.ConsensusContract)));
+            transactions.Add(GetTransactionForDeployment(chainId, typeof(ConsensusContract)));
+            transactions.Add(GetTransactionForDeployment(chainId, typeof(TokenContract)));
+            transactions.Add(GetTransactionForDeployment(chainId, typeof(ResourceContract)));
+            transactions.Add(GetTransactionForDeployment(chainId, typeof(FeeReceiverContract)));
             // TODO: Add initialize transactions
             return transactions.ToArray();
         }

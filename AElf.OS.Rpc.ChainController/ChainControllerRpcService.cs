@@ -65,10 +65,18 @@ namespace AElf.OS.Rpc.ChainController
         public Task<JObject> GetChainInfo()
         {
             var basicContractZero = Address.BuildContractAddress(_chainOptions.ChainId, 0);
+            var consensusContract = Address.BuildContractAddress(_chainOptions.ChainId, 1);
+            var tokenContract = Address.BuildContractAddress(_chainOptions.ChainId, 2);
+            var resourceContract = Address.BuildContractAddress(_chainOptions.ChainId, 3);
+            var feeReceiverContract = Address.BuildContractAddress(_chainOptions.ChainId, 4);
 
             var response = new JObject
             {
                 [SmartContract.GenesisSmartContractZeroAssemblyName] = basicContractZero.GetFormatted(),
+                [SmartContract.GenesisConsensusContractAssemblyName] = consensusContract.GetFormatted(),
+                [SmartContract.GenesisTokenContractAssemblyName] = tokenContract.GetFormatted(),
+                [SmartContract.GenesisResourceContractAssemblyName] = resourceContract.GetFormatted(),
+                [SmartContract.GenesisFeeReceiverContractAssemblyName] = feeReceiverContract.GetFormatted(),
                 ["ChainId"] = ChainHelpers.ConvertChainIdToBase58(_chainOptions.ChainId)
             };
 
