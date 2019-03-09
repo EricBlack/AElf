@@ -1,40 +1,46 @@
-using System.Collections.Generic;
-using AElf.Database;
+using System;
+using System.Threading.Tasks;
+using AElf.Common;
+using AElf.Kernel;
 using AElf.Kernel.Blockchain.Application;
-using AElf.Kernel.Infrastructure;
+using AElf.Kernel.SmartContract.Application;
+using AElf.Kernel.SmartContractExecution.Application;
+using AElf.Kernel.Tests;
 using AElf.Modularity;
 using Microsoft.Extensions.DependencyInjection;
-using Volo.Abp.EventBus;
+using Moq;
+using Volo.Abp;
 using Volo.Abp.Modularity;
 
 namespace AElf.CrossChain
 {
-    [DependsOn(typeof(AbpEventBusModule),
-        typeof(CrossChainAElfModule))]
+    [DependsOn(
+        typeof(CrossChainAElfModule), typeof(KernelCoreTestAElfModule))]
     public class CrossChainTestModule : AElfModule
     {
-        public override void PreConfigureServices(ServiceConfigurationContext context)
-        {
-            context.Services.AddTransient<ITransactionResultService, NoBranchTransactionResultService>();
-            context.Services.AddTransient<ITransactionResultQueryService, NoBranchTransactionResultService>();
-        }
-
         public override void ConfigureServices(ServiceConfigurationContext context)
         {
-            var services = context.Services;
-
-            services.AddKeyValueDbContext<BlockchainKeyValueDbContext>(o => o.UseInMemoryDatabase());
-            services.AddKeyValueDbContext<StateKeyValueDbContext>(o => o.UseInMemoryDatabase());
-
-            //TODO: please mock data here, do not directly new object, if you have multiple dependency, you should have 
-            //different modules, like  AElfIntegratedTest<AAACrossChainTestModule>,  AElfIntegratedTest<BBBCrossChainTestModule>
-        }
-        public override void PostConfigureServices(ServiceConfigurationContext context)
-        {
-            context.Services.RemoveAll(x =>
-                (x.ServiceType == typeof(ITransactionResultService) ||
-                 x.ServiceType == typeof(ITransactionResultQueryService)) &&
-                x.ImplementationType != typeof(NoBranchTransactionResultService));
+            //context.Services.AddTransient<IBlockValidationProvider, CrossChainValidationProvider>();
+            context.Services.AddSingleton<CrossChainTestHelper>();
+            context.Services.AddTransient(provider =>
+            {
+                var mockTransactionReadOnlyExecutionService = new Mock<ITransactionReadOnlyExecutionService>();
+                mockTransactionReadOnlyExecutionService
+                .Setup(m => m.ExecuteAsync(It.IsAny<IChainContext>(), It.IsAny<Transaction>(), It.IsAny<DateTime>()))
+                .Returns<IChainContext, Transaction, DateTime>((chainContext, transaction, dateTime) =>
+                {
+                    var crossChainTestHelper = context.Services.GetRequiredServiceLazy<CrossChainTestHelper>().Value;                   
+                    return Task.FromResult(crossChainTestHelper.CreateFakeTransactionTrace(transaction));
+                });
+                return mockTransactionReadOnlyExecutionService.Object;
+            });
+            context.Services.AddTransient(provider =>
+            {
+                var mockSmartContractAddressService = new Mock<ISmartContractAddressService>();
+                mockSmartContractAddressService.Setup(m => m.GetAddressByContractName(It.IsAny<Hash>()))
+                    .Returns(Address.Generate);
+                return mockSmartContractAddressService.Object;
+            });
         }
     }
 }

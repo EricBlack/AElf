@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 using AElf.Common;
 using AElf.Kernel.Blockchain.Domain;
@@ -37,6 +36,7 @@ namespace AElf.Kernel.Blockchain.Application
         Task<Hash> GetBlockHashByHeightAsync(Chain chain, long height, Hash chainBranchBlockHash = null);
         Task<BlockAttachOperationStatus> AttachBlockToChainAsync(Chain chain, Block block);
         Task SetBestChainAsync(Chain chain, long bestChainHeight, Hash bestChainHash);
+        Task SetIrreversibleBlockAsync(Chain chain, long irreversibleBlockHeight, Hash irreversibleBlockHash);
     }
 
     public interface ILightBlockchainService : IBlockchainService
@@ -103,12 +103,6 @@ namespace AElf.Kernel.Blockchain.Application
         {
             await AddBlockAsync(block);
             var chain = await _chainManager.CreateAsync(block.GetHash());
-            await LocalEventBus.PublishAsync(
-                new BestChainFoundEventData()
-                {
-                    BlockHash = chain.BestChainHash,
-                    BlockHeight = chain.BestChainHeight
-                });
             return chain;
         }
 
@@ -180,6 +174,23 @@ namespace AElf.Kernel.Blockchain.Application
             await _chainManager.SetBestChainAsync(chain, bestChainHeight, bestChainHash);
         }
 
+        public async Task SetIrreversibleBlockAsync(Chain chain, long irreversibleBlockHeight,
+            Hash irreversibleBlockHash)
+        {
+            Logger.LogInformation($"Lib height: {irreversibleBlockHeight}, Lib Hash: {irreversibleBlockHash}");
+
+            // Create before IChainManager.SetIrreversibleBlockAsync so that we can correctly get the previous LIB info
+            var eventDataToPublish = new NewIrreversibleBlockFoundEvent()
+            {
+                PreviousIrreversibleBlockHash = chain.LastIrreversibleBlockHash,
+                PreviousIrreversibleBlockHeight = chain.LastIrreversibleBlockHeight,
+                BlockHash = irreversibleBlockHash,
+                BlockHeight = irreversibleBlockHeight
+            };
+            await _chainManager.SetIrreversibleBlockAsync(chain, irreversibleBlockHash);
+            await LocalEventBus.PublishAsync(eventDataToPublish);
+        }
+
         public async Task<List<Hash>> GetReversedBlockHashes(Hash lastBlockHash, int count)
         {
             if (count == 0)
@@ -189,7 +200,7 @@ namespace AElf.Kernel.Blockchain.Application
 
             var chainBlockLink = await _chainManager.GetChainBlockLinkAsync(lastBlockHash);
 
-            if (chainBlockLink == null || chainBlockLink.PreviousBlockHash == Hash.Genesis)
+            if (chainBlockLink == null || chainBlockLink.PreviousBlockHash == Hash.Empty)
                 return null;
 
             hashes.Add(chainBlockLink.PreviousBlockHash);
@@ -198,7 +209,7 @@ namespace AElf.Kernel.Blockchain.Application
             {
                 chainBlockLink = await _chainManager.GetChainBlockLinkAsync(chainBlockLink.PreviousBlockHash);
 
-                if (chainBlockLink == null || chainBlockLink.PreviousBlockHash == Hash.Genesis)
+                if (chainBlockLink == null || chainBlockLink.PreviousBlockHash == Hash.Empty)
                     break;
 
                 hashes.Add(chainBlockLink.PreviousBlockHash);

@@ -120,7 +120,6 @@ namespace AElf.Kernel.SmartContractExecution.Application
                     var blockLink = successLinks.Last();
                     await _blockchainService.SetBestChainAsync(chain, blockLink.Height, blockLink.BlockHash);
 
-                    // TODO: Should we let the handler decide whether to await?
                     await LocalEventBus.PublishAsync(
                         new BestChainFoundEventData()
                         {
@@ -132,7 +131,7 @@ namespace AElf.Kernel.SmartContractExecution.Application
             }
 
             stopwatch.Stop();
-            Logger.LogInformation($"Attaching block duration: {stopwatch.ElapsedMilliseconds} ms, status {status}");
+            Logger.LogInformation($"Longest chain execution duration: {stopwatch.ElapsedMilliseconds} ms, status {status}, best chain {chain.BestChainHash}");
 
             return blockLinks;
         }

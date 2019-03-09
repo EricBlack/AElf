@@ -21,6 +21,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Volo.Abp.Threading;
+using Volo.Abp.Validation;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -35,6 +36,7 @@ namespace AElf.OS.Rpc.ChainController.Tests
         private readonly ISmartContractExecutiveService _smartContractExecutiveService;
         private readonly IAccountService _accountService;
         private readonly ECKeyPair _userEcKeyPair;
+        private readonly ISmartContractAddressService _smartContractAddressService;
 
         public ChainControllerRpcServiceServerTest(ITestOutputHelper outputHelper) : base(outputHelper)
         {
@@ -46,10 +48,20 @@ namespace AElf.OS.Rpc.ChainController.Tests
             _minerService = GetRequiredService<IMinerService>();
             _smartContractExecutiveService = GetRequiredService<ISmartContractExecutiveService>();
             _accountService = GetRequiredService<IAccountService>();
+            _smartContractAddressService = GetRequiredService<ISmartContractAddressService>();
 
             _userEcKeyPair = CryptoHelpers.GenerateKeyPair();
 
             AsyncHelper.RunSync(async () => await InitAccountAmount());
+        }
+
+        [Fact]
+        public async Task Get_Commands_Success()
+        {
+            //Get commands
+            var response = await JsonCallAsJObject("/chain", "GetCommands");
+            var commands = response["result"].ToList();
+            commands.Count.ShouldBeGreaterThan(1);
         }
 
         [Fact]
@@ -75,7 +87,7 @@ namespace AElf.OS.Rpc.ChainController.Tests
         public async Task Connect_Chain_Success()
         {
             var chainId = _blockchainService.GetChainId();
-            var basicContractZero = Address.BuildContractAddress(chainId, 0);
+            var basicContractZero = _smartContractAddressService.GetZeroSmartContractAddress();
 
             var response = await JsonCallAsJObject("/chain", "ConnectChain");
 
@@ -93,7 +105,7 @@ namespace AElf.OS.Rpc.ChainController.Tests
             // Deploy a new contact and mined
             var chain = await _blockchainService.GetChainAsync();
             var transaction = await GenerateTransaction(chain, Address.FromPublicKey(_userEcKeyPair.PublicKey),
-                Address.BuildContractAddress(chain.Id, 0), nameof(ISmartContractZero.DeploySmartContract), 2,
+                _smartContractAddressService.GetZeroSmartContractAddress(), nameof(ISmartContractZero.DeploySmartContract), 2,
                 File.ReadAllBytes(typeof(BasicContractZero).Assembly.Location));
             var signature =
                 CryptoHelpers.SignWithPrivateKey(_userEcKeyPair.PrivateKey, transaction.GetHash().DumpByteArray());
@@ -104,7 +116,7 @@ namespace AElf.OS.Rpc.ChainController.Tests
             
             // Get abi
             chain = await _blockchainService.GetChainAsync();
-            var newContractAddress = Address.BuildContractAddress(chain.Id, 3);
+            var newContractAddress = _smartContractAddressService.GetZeroSmartContractAddress();
             var chainContext = new ChainContext
             {
                 BlockHash = chain.BestChainHash,
@@ -166,6 +178,19 @@ namespace AElf.OS.Rpc.ChainController.Tests
             existTransaction.Transactions[0].GetHash().ShouldBe(transactionHash);
         }
 
+        [Fact(Skip = "https://github.com/AElfProject/AElf/issues/1105")]
+        public async Task Call_ReadOnly_Success()
+        {
+            // Generate a transaction
+            var chain = await _blockchainService.GetChainAsync();
+            var transaction = await GenerateViewTransaction(chain, "Symbol");
+            var transactionHash = transaction.GetHash();
+
+            var response = await JsonCallAsJObject("/chain", "Call",
+                new {rawTransaction = transaction.ToByteArray().ToHex()});
+            response["result"].ToString().ShouldBe("");
+        }
+
         [Fact]
         public async Task Broadcast_Transaction_ReturnInvalidTransaction()
         {
@@ -218,6 +243,9 @@ namespace AElf.OS.Rpc.ChainController.Tests
             var existTransaction = await _txHub.GetExecutableTransactionSetAsync();
             responseTransactionIds[0].ToString().ShouldBe(existTransaction.Transactions[0].GetHash().ToHex());
             responseTransactionIds[1].ToString().ShouldBe(existTransaction.Transactions[1].GetHash().ToHex());
+            
+            response = await JsonCallAsJObject("/chain", "GetTransactionPoolStatus");
+            response["result"]["Queued"].ShouldBe(2);
         }
 
         [Fact]
@@ -295,13 +323,13 @@ namespace AElf.OS.Rpc.ChainController.Tests
             var block = await MinedOneBlock(chain);
 
             var response = await JsonCallAsJObject("/chain", "GetTransactionsResult",
-                new {blockHash = block.GetHash().ToHex(), offset = 0, num = 15});
+                new {blockHash = block.GetHash().ToHex(), offset = 0, limit = 15});
 
             var responseTransactionResults = response["result"].ToList();
             responseTransactionResults.Count.ShouldBe(15);
 
             response = await JsonCallAsJObject("/chain", "GetTransactionsResult",
-                new {blockHash = block.GetHash().ToHex(), offset = 15, num = 15});
+                new {blockHash = block.GetHash().ToHex(), offset = 15, limit = 15});
 
             responseTransactionResults = response["result"].ToList();
             responseTransactionResults.Count.ShouldBe(5);
@@ -352,9 +380,9 @@ namespace AElf.OS.Rpc.ChainController.Tests
             responseResult["Header"]["MerkleTreeRootOfWorldState"].ToString()
                 .ShouldBe(block.Header.MerkleTreeRootOfWorldState.ToHex());
             responseResult["Header"]["SideChainTransactionsRoot"].ToString().ShouldBe(
-                block.Header.BlockExtraData == null
+                !block.Header.BlockExtraDatas.Any()
                     ? string.Empty
-                    : block.Header.BlockExtraData.SideChainTransactionsRoot.ToHex());
+                    : Hash.LoadByteArray(block.Header.BlockExtraDatas[0].ToByteArray()).ToHex());
             ((long) responseResult["Header"]["Height"]).ShouldBe(block.Height);
             Convert.ToDateTime(responseResult["Header"]["Time"]).ShouldBe(block.Header.Time.ToDateTime());
             responseResult["Header"]["ChainId"].ToString().ShouldBe(ChainHelpers.ConvertChainIdToBase58(chain.Id));
@@ -377,6 +405,50 @@ namespace AElf.OS.Rpc.ChainController.Tests
             responseMessage.ShouldBe(Error.Message[Error.NotFound]);
         }
 
+        [Fact]
+        public async Task Get_Chain_Status_Success()
+        {
+            var response = await JsonCallAsJObject("/chain", "GetChainStatus");
+            response["result"]["Branches"].ShouldNotBeNull();
+            Convert.ToInt32(response["result"]["BestChainHeight"]).ShouldBe(2);
+        }
+
+        [Fact]
+        public async Task Get_Block_State_Success()
+        {
+            var chain = await _blockchainService.GetChainAsync();
+            var transactions = new List<Transaction>();
+            for (int i = 0; i < 3; i++)
+            {
+                transactions.Add(await GenerateTransferTransaction(chain));
+            }
+
+            await BroadcastTransactions(transactions);
+            var block = await MinedOneBlock(chain);
+            
+            var response = await JsonCallAsJObject("/chain", "GetBlockInfo",
+                new {blockHeight = 3, includeTransactions = true});
+            var responseResult = response["result"];
+            var blockHash = responseResult["BlockHash"].ToString();
+            
+            var response1 = await JsonCallAsJObject("/chain", "GetBlockState",
+                new{ blockHash = blockHash });
+            response1["result"].ShouldNotBeNull();
+            response1["result"]["BlockHash"].ToString().ShouldBe(blockHash);
+            response1["result"]["BlockHeight"].To<int>().ShouldBe(3);
+            response1["result"]["Changes"].ShouldNotBeNull();
+        }
+        
+        [Fact]
+        public async Task Query_NonExist_Api_Failed()
+        {
+            var response = await JsonCallAsJObject("/chain", "TestMethod",
+                new { Test = "testParameter" });
+            response.ShouldNotBeNull();
+            response["error"]["code"].To<int>().ShouldBe(-32601);
+            response["error"]["message"].ToString().ShouldBe("The specified method does not exist or is not available");
+        }
+
         private async Task<Block> MinedOneBlock(Chain chain)
         {
             var block = await _minerService.MineAsync(chain.BestChainHash, chain.BestChainHeight,
@@ -390,12 +462,23 @@ namespace AElf.OS.Rpc.ChainController.Tests
             var newUserKeyPair = CryptoHelpers.GenerateKeyPair();
 
             var transaction = await GenerateTransaction(chain, Address.FromPublicKey(_userEcKeyPair.PublicKey),
-                Address.BuildContractAddress(chain.Id, 2), nameof(TokenContract.Transfer),
+                _smartContractAddressService.GetAddressByContractName(Hash.FromString(typeof(TokenContract).FullName)), nameof(TokenContract.Transfer),
                 Address.FromPublicKey(newUserKeyPair.PublicKey), 10);
 
             var signature =
                 CryptoHelpers.SignWithPrivateKey(_userEcKeyPair.PrivateKey, transaction.GetHash().DumpByteArray());
             transaction.Sigs.Add(ByteString.CopyFrom(signature));
+
+            return transaction;
+        }
+
+        private async Task<Transaction> GenerateViewTransaction(Chain chain, string method, params object[] paramArray)
+        {
+            var newUserKeyPair = CryptoHelpers.GenerateKeyPair();
+
+            var transaction = await GenerateTransaction(chain, Address.FromPublicKey(_userEcKeyPair.PublicKey),
+                _smartContractAddressService.GetAddressByContractName(Hash.FromString(typeof(TokenContract).FullName)), nameof(TokenContract.BalanceOf),
+                paramArray);
 
             return transaction;
         }
@@ -412,7 +495,7 @@ namespace AElf.OS.Rpc.ChainController.Tests
             var chain = await _blockchainService.GetChainAsync();
             var account = await _accountService.GetAccountAsync();
 
-            var transaction = await GenerateTransaction(chain, account, Address.BuildContractAddress(chain.Id, 2),
+            var transaction = await GenerateTransaction(chain, account, _smartContractAddressService.GetAddressByContractName(Hash.FromString(typeof(TokenContract).FullName)),
                 nameof(TokenContract.Transfer), Address.FromPublicKey(_userEcKeyPair.PublicKey), 10000);
 
             var signature = await _accountService.SignAsync(transaction.GetHash().DumpByteArray());
@@ -435,7 +518,7 @@ namespace AElf.OS.Rpc.ChainController.Tests
                 RefBlockPrefix = ByteString.CopyFrom(chain.BestChainHash.DumpByteArray().Take(4).ToArray())
             };
 
-            return transaction;
+            return await Task.FromResult(transaction);
         }
     }
 }
