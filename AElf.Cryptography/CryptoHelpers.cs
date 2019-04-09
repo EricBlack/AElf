@@ -1,9 +1,28 @@
 ﻿using System;
+using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
+using AElf.Common;
+using AElf.Cryptography.Certificate;
 using AElf.Cryptography.ECDSA;
+using Org.BouncyCastle.Asn1.Pkcs;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Agreement;
+using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Generators;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Math;
+using Org.BouncyCastle.Math.EC;
+using Org.BouncyCastle.OpenSsl;
+using Org.BouncyCastle.Security;
 using Secp256k1Net;
+using Virgil.Crypto;
+using ECParameters = AElf.Cryptography.ECDSA.ECParameters;
+
+[assembly: InternalsVisibleTo("AElf.Cryptography.Tests")]
 
 namespace AElf.Cryptography
 {
@@ -11,13 +30,37 @@ namespace AElf.Cryptography
     {
         private static readonly Secp256k1 Secp256K1 = new Secp256k1();
 
+        private static readonly VirgilCrypto Crypto = new VirgilCrypto(KeyPairType.RSA_2048);
+
         // ReaderWriterLock for thread-safe with Secp256k1 APIs
         private static readonly ReaderWriterLock Lock = new ReaderWriterLock();
 
-        // TODO: maybe need refactor, both Cryptography.EC* and Cryptography.CryptoHelpers expose public method.
         static CryptoHelpers()
         {
             AppDomain.CurrentDomain.ProcessExit += (sender, arg) => { Secp256K1.Dispose(); };
+        }
+
+        public static ECKeyPair FromPrivateKey(byte[] privateKey)
+        {
+            if (privateKey == null || privateKey.Length != 32)
+            {
+                throw new ArgumentException("Private key has to have length of 32.");
+            }
+
+            try
+            {
+                Lock.AcquireWriterLock(Timeout.Infinite);
+                var secp256K1PubKey = new byte[64];
+
+                Secp256K1.PublicKeyCreate(secp256K1PubKey, privateKey);
+                var pubKey = new byte[Secp256k1.SERIALIZED_UNCOMPRESSED_PUBKEY_LENGTH];
+                Secp256K1.PublicKeySerialize(pubKey, secp256K1PubKey);
+                return new ECKeyPair(privateKey, pubKey);
+            }
+            finally
+            {
+                Lock.ReleaseWriterLock();
+            }
         }
 
         public static ECKeyPair GenerateKeyPair()
@@ -40,10 +83,6 @@ namespace AElf.Cryptography
                 Secp256K1.PublicKeySerialize(pubKey, secp256K1PubKey);
                 return new ECKeyPair(privateKey, pubKey);
             }
-            catch (Exception ex)
-            {
-                throw new Exception("Exception while GenerateKeyPair", ex);
-            }
             finally
             {
                 Lock.ReleaseWriterLock();
@@ -61,10 +100,6 @@ namespace AElf.Cryptography
                 Secp256K1.RecoverableSignatureSerializeCompact(compactSig, out var recoverId, recSig);
                 compactSig[64] = (byte) recoverId; // put recover id at the last slot
                 return compactSig;
-            }
-            catch (Exception ex)
-            {
-                throw new Exception("Exception while SignWithPrivateKey", ex);
             }
             finally
             {
@@ -89,9 +124,38 @@ namespace AElf.Cryptography
                 publicKey = pubKey;
                 return true;
             }
-            catch (Exception ex)
+            finally
             {
-                throw new Exception("Exception while RecoverPublicKey", ex);
+                Lock.ReleaseWriterLock();
+            }
+        }
+
+        public static byte[] EncryptMessage(byte[] senderPrivateKey, byte[] receiverPublicKey, byte[] plainText)
+        {
+            var crypto = new VirgilCrypto(KeyPairType.EC_SECP256K1);
+            var ecdhKey = Ecdh(senderPrivateKey, receiverPublicKey);
+            var newKeyPair = crypto.GenerateKeys(KeyPairType.EC_SECP256K1, ecdhKey);
+            return crypto.Encrypt(plainText, newKeyPair.PublicKey);
+        }
+
+        public static byte[] DecryptMessage(byte[] senderPublicKey, byte[] receiverPrivateKey, byte[] cipherText)
+        {
+            var crypto = new VirgilCrypto(KeyPairType.EC_SECP256K1);
+            var ecdhKey = Ecdh(receiverPrivateKey, senderPublicKey);
+            var newKeyPair = crypto.GenerateKeys(KeyPairType.EC_SECP256K1, ecdhKey);
+            return crypto.Decrypt(cipherText, newKeyPair.PrivateKey);
+        }
+
+        public static byte[] Ecdh(byte[] privateKey, byte[] publicKey)
+        {
+            try
+            {
+                Lock.AcquireWriterLock(Timeout.Infinite);
+                var usablePublicKey = new byte[Secp256k1.SERIALIZED_UNCOMPRESSED_PUBKEY_LENGTH];
+                Secp256K1.PublicKeyParse(usablePublicKey, publicKey);
+                var ecdhKey = new byte[Secp256k1.SERIALIZED_COMPRESSED_PUBKEY_LENGTH];
+                Secp256K1.Ecdh(ecdhKey, usablePublicKey, privateKey);
+                return ecdhKey;
             }
             finally
             {
@@ -102,7 +166,7 @@ namespace AElf.Cryptography
         /// <summary>
         /// Returns a byte array of the specified length, filled with random bytes.
         /// </summary>
-        public static byte[] RandomFill(int count)
+        internal static byte[] RandomFill(int count)
         {
             var rnd = new Random();
             var random = new byte[count];

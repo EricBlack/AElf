@@ -39,6 +39,7 @@ namespace AElf.Kernel
             services.AddStoreKeyPrefixProvide<Chain>("c");
 
             services.AddTransient(typeof(IStateStore<>), typeof(StateStore<>));
+            services.AddSingleton(typeof(INotModifiedCachedStateStore<>), typeof(NotModifiedCachedStateStore<>));
             services.AddTransient(typeof(IBlockchainStore<>), typeof(BlockchainStore<>));
 
             services.AddKeyValueDbContext<BlockchainKeyValueDbContext>(p => p.UseRedisDatabase());

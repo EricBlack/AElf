@@ -2,6 +2,7 @@
 using AElf.Common;
 using AElf.Database;
 using AElf.Kernel;
+using AElf.Kernel.Account.Application;
 using AElf.Kernel.Infrastructure;
 using AElf.Kernel.SmartContract;
 using AElf.Kernel.SmartContract.Application;
@@ -16,7 +17,6 @@ namespace AElf.Sdk.CSharp.Tests
 {
     [DependsOn(
         typeof(SmartContractAElfModule),
-        typeof(TestBaseAElfModule),
         typeof(TestBaseKernelAElfModule))]
     public class TestSdkCSharpAElfModule : AElfModule
     {
@@ -24,10 +24,9 @@ namespace AElf.Sdk.CSharp.Tests
         {
             var services = context.Services;
             
-            services.AddTransient<ISmartContractRunner>(p =>
+            services.AddTransient(p =>
             {
                 var mockExecutive = new Mock<IExecutive>();
-                mockExecutive.SetupProperty(e => e.ContractHash);
                 
                 var mockSmartContractRunner = new Mock<ISmartContractRunner>();
                 mockSmartContractRunner.SetupGet(m => m.Category).Returns(0);
@@ -36,6 +35,8 @@ namespace AElf.Sdk.CSharp.Tests
                     .Returns(Task.FromResult(mockExecutive.Object));
                 return mockSmartContractRunner.Object;
             });
+            
+            services.AddSingleton(p => Mock.Of<IAccountService>());
         }
     }
 }

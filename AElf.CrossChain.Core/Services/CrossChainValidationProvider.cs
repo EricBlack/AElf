@@ -1,24 +1,23 @@
-using System;
 using System.Linq;
+using System;
 using System.Threading.Tasks;
 using AElf.Common;
-using AElf.Cryptography;
 using AElf.Kernel;
 using AElf.Kernel.Blockchain.Application;
-using AElf.Kernel.Blockchain.Domain;
+using Google.Protobuf;
+using Volo.Abp.DependencyInjection;
 
 namespace AElf.CrossChain
 {
     public class CrossChainValidationProvider : IBlockValidationProvider
     {
         private readonly ICrossChainService _crossChainService;
-        private readonly ITransactionResultQueryService _transactionResultQueryService;
+        private readonly IBlockExtraDataExtractor _blockExtraDataExtractor;
 
-        public CrossChainValidationProvider(ITransactionResultQueryService transactionResultQueryService, 
-            ICrossChainService crossChainService)
+        public CrossChainValidationProvider(ICrossChainService crossChainService, IBlockExtraDataExtractor blockExtraDataExtractor)
         {
-            _transactionResultQueryService = transactionResultQueryService;
             _crossChainService = crossChainService;
+            _blockExtraDataExtractor = blockExtraDataExtractor;
         }
 
         public Task<bool> ValidateBlockBeforeExecuteAsync(IBlock block)
@@ -29,44 +28,40 @@ namespace AElf.CrossChain
 
         public async Task<bool> ValidateBlockAfterExecuteAsync(IBlock block)
         {
-            try
+            if (block.Height == KernelConstants.GenesisBlockHeight)
+                return true;
+            
+            var indexedCrossChainBlockData =
+                await _crossChainService.GetCrossChainBlockDataIndexedInStateAsync(block.Header.GetHash(), block.Height);
+            var extraData = _blockExtraDataExtractor.ExtractCrossChainExtraData(block.Header);
+            if (indexedCrossChainBlockData == null)
             {
-                if (!CrossChainEventHelper.TryGetLogEventInBlock(block, out var logEvent) ||
-                    await ValidateCrossChainLogEventInBlock(logEvent, block))
-                    return true; // no event means no indexing.
-                throw new Exception();
+                return extraData == null;
             }
-            catch (Exception e)
-            {
-                throw new ValidateNextTimeBlockValidationException("Cross chain validation failed after execution.", e);
-            }
+            
+            bool res = await ValidateCrossChainBlockDataAsync(indexedCrossChainBlockData, extraData, block);
+            if(!res)
+                throw new ValidateNextTimeBlockValidationException("Cross chain validation failed after execution.");
+            return true;
         }
 
-        private async Task<bool> ValidateCrossChainLogEventInBlock(LogEvent interestedLogEvent, IBlock block)
+        private async Task<bool> ValidateCrossChainBlockDataAsync(CrossChainBlockData crossChainBlockData, 
+            CrossChainExtraData extraData, IBlock block)
         {
-            foreach (var txId in block.Body.Transactions)
-            {
-                var res = await _transactionResultQueryService.GetTransactionResultAsync(txId);
-                var sideChainTransactionsRoot =
-                    CrossChainEventHelper.TryGetValidateCrossChainBlockData(res, block, interestedLogEvent,
-                        out var crossChainBlockData);
-                // first check equality with the root in header
-                if(sideChainTransactionsRoot == null 
-                   || !sideChainTransactionsRoot.Equals(block.Header.BlockExtraData.SideChainTransactionsRoot))
-                    continue;
-                return await ValidateCrossChainBlockDataAsync(crossChainBlockData,
-                    block.Header.GetHash(), block.Header.Height);
-            }
-            return false;
-        }
-
-        private async Task<bool> ValidateCrossChainBlockDataAsync(CrossChainBlockData crossChainBlockData,
-            Hash preBlockHash, long preBlockHeight)
-        {
-            return await _crossChainService.ValidateSideChainBlockDataAsync(
-                       crossChainBlockData.SideChainBlockData, preBlockHash, preBlockHeight) &&
+            var txRootHashList = crossChainBlockData.SideChainBlockData.Select(scb => scb.TransactionMerkleTreeRoot).ToList();
+            var calculatedSideChainTransactionsRoot = new BinaryMerkleTree().AddNodes(txRootHashList).ComputeRootHash();
+            
+            // first check identity with the root in header
+            if (extraData != null && !calculatedSideChainTransactionsRoot.Equals(extraData.SideChainTransactionsRoot) ||
+                extraData == null && !calculatedSideChainTransactionsRoot.Equals(Hash.Empty))
+                return false;
+            
+            // check cache identity
+            var res = await _crossChainService.ValidateSideChainBlockDataAsync(
+                       crossChainBlockData.SideChainBlockData.ToList(), block.Header.PreviousBlockHash, block.Height - 1) &&
                    await _crossChainService.ValidateParentChainBlockDataAsync(
-                       crossChainBlockData.ParentChainBlockData, preBlockHash, preBlockHeight);
+                       crossChainBlockData.ParentChainBlockData.ToList(), block.Header.PreviousBlockHash, block.Height - 1);
+            return res;
         }
     }
 }

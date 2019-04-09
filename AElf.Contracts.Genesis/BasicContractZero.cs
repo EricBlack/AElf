@@ -4,55 +4,50 @@ using AElf.Kernel;
 using AElf.Kernel.KernelAccount;
 using AElf.Sdk.CSharp;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 
 namespace AElf.Contracts.Genesis
 {
-    public class BasicContractZero : CSharpSmartContract<BasicContractZeroState>, ISmartContractZero
+    public class BasicContractZero : BasicContractZeroContainer.BasicContractZeroBase, ISmartContractZero
     {
         #region Views
 
-        [View]
-        public ulong CurrentContractSerialNumber()
+        public override UInt64Value CurrentContractSerialNumber(Empty input)
         {
-            return State.ContractSerialNumber.Value;
+            return new UInt64Value() {Value = State.ContractSerialNumber.Value};
         }
 
-        [View]
-        public string GetContractInfo(Address contractAddress)
+        public override Kernel.ContractInfo GetContractInfo(Address input)
         {
-            var info = State.ContractInfos[contractAddress];
+            var info = State.ContractInfos[input];
             if (info == null)
             {
-                return string.Empty;
+                return new Kernel.ContractInfo();
             }
 
-            return info.ToString();
+            return info;
         }
 
-        [View]
-        public Address GetContractOwner(Address contractAddress)
+        public override Address GetContractOwner(Address input)
         {
-            var info = State.ContractInfos[contractAddress];
+            var info = State.ContractInfos[input];
             return info?.Owner;
         }
 
-        [View]
-        public Hash GetContractHash(Address contractAddress)
+        public override Hash GetContractHash(Address input)
         {
-            var info = State.ContractInfos[contractAddress];
+            var info = State.ContractInfos[input];
             return info?.CodeHash;
         }
 
-        [View]
-        public Address GetContractAddress(Hash codeHash)
+        public override Address GetContractAddressByName(Hash input)
         {
-            return State.CodeAddressMapping[codeHash];
+            return State.NameAddressMapping[input];
         }
 
-        [View]
-        public SmartContractRegistration GetSmartContractRegistrationByAddress(Address address)
+        public override SmartContractRegistration GetSmartContractRegistrationByAddress(Address input)
         {
-            var info = State.ContractInfos[address];
+            var info = State.ContractInfos[input];
             if (info == null)
             {
                 return null;
@@ -65,20 +60,35 @@ namespace AElf.Contracts.Genesis
 
         #region Actions
 
-        public byte[] DeploySmartContract(int category, byte[] code)
+        public override Address DeploySystemSmartContract(SystemContractDeploymentInput input)
         {
+            var name = input.Name;
+            var category = input.Category;
+            var code = input.Code.ToByteArray();
+            var transactionMethodCallList = input.TransactionMethodCallList;
+            var address = PrivateDeploySystemSmartContract(name, category, code);
+
+            foreach (var methodCall in transactionMethodCallList.Value)
+            {
+                Context.SendInline(address, methodCall.MethodName, methodCall.Params);
+            }
+
+            return address;
+        }
+
+
+        private Address PrivateDeploySystemSmartContract(Hash name, int category, byte[] code)
+        {
+            if (name != null)
+                Assert(State.NameAddressMapping[name] == null, "contract name already been registered");
+
+
             var serialNumber = State.ContractSerialNumber.Value;
             // Increment
             State.ContractSerialNumber.Value = serialNumber + 1;
-            var contractAddress = Address.BuildContractAddress(Context.ChainId, serialNumber);
+            var contractAddress = AddressHelper.BuildContractAddress(Context.ChainId, serialNumber);
 
             var codeHash = Hash.FromRawBytes(code);
-
-            var address = State.CodeAddressMapping[codeHash];
-
-            //Assert(address == null || address.Value.Length == 0, "should only deploy one smart contract once");
-
-            State.CodeAddressMapping[codeHash] = contractAddress;
 
             var info = new ContractInfo
             {
@@ -98,9 +108,9 @@ namespace AElf.Contracts.Genesis
 
             State.SmartContractRegistrations[reg.CodeHash] = reg;
 
-            Context.DeployContract(contractAddress, reg);
+            Context.DeployContract(contractAddress, reg, name);
 
-            Context.FireEvent(new ContractHasBeenDeployed()
+            Context.Fire(new ContractDeployed()
             {
                 CodeHash = codeHash,
                 Address = contractAddress,
@@ -109,11 +119,30 @@ namespace AElf.Contracts.Genesis
 
             Context.LogDebug(() => "BasicContractZero - Deployment ContractHash: " + codeHash.ToHex());
             Context.LogDebug(() => "BasicContractZero - Deployment success: " + contractAddress.GetFormatted());
-            return contractAddress.DumpByteArray();
+
+
+            if (name != null)
+                State.NameAddressMapping[name] = contractAddress;
+
+
+            return contractAddress;
         }
 
-        public byte[] UpdateSmartContract(Address contractAddress, byte[] code)
+        public override Address DeploySmartContract(ContractDeploymentInput input)
         {
+            return DeploySystemSmartContract(new SystemContractDeploymentInput()
+            {
+                Category = input.Category,
+                Code = input.Code,
+                TransactionMethodCallList = new SystemTransactionMethodCallList()
+            });
+        }
+
+
+        public override Address UpdateSmartContract(ContractUpdateInput input)
+        {
+            var contractAddress = input.Address;
+            var code = input.Code.ToByteArray();
             var info = State.ContractInfos[contractAddress];
 
             Assert(info != null, "Contract does not exist.");
@@ -135,13 +164,9 @@ namespace AElf.Contracts.Genesis
 
             State.SmartContractRegistrations[reg.CodeHash] = reg;
 
+            Context.UpdateContract(contractAddress, reg, null);
 
-            Context.UpdateContract(contractAddress, reg);
-
-            State.CodeAddressMapping[newCodeHash] = contractAddress;
-
-
-            Context.FireEvent(new ContractCodeHasBeenUpdated()
+            Context.Fire(new CodeUpdated()
             {
                 Address = contractAddress,
                 OldCodeHash = oldCodeHash,
@@ -149,25 +174,47 @@ namespace AElf.Contracts.Genesis
             });
 
             Context.LogDebug(() => "BasicContractZero - update success: " + contractAddress.GetFormatted());
-            return contractAddress.DumpByteArray();
+            return contractAddress;
         }
 
-        public void ChangeContractOwner(Address contractAddress, Address newOwner)
+        public override Empty ChangeContractOwner(ChangeContractOwnerInput input)
         {
+            var contractAddress = input.ContractAddress;
+            var newOwner = input.NewOwner;
             var info = State.ContractInfos[contractAddress];
             Assert(info != null && info.Owner.Equals(Context.Sender), "no permission.");
 
             var oldOwner = info.Owner;
-            info.Owner = newOwner;
+            info.Owner = input.NewOwner;
             State.ContractInfos[contractAddress] = info;
-            Context.FireEvent(new OwnerHasBeenChanged
+            Context.Fire(new OwnerChanged
             {
                 Address = contractAddress,
                 OldOwner = oldOwner,
                 NewOwner = newOwner
             });
+            return new Empty();
         }
 
         #endregion Actions
+    }
+
+    public static class AddressHelper
+    {
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <returns></returns>
+        /// <exception cref="ArgumentOutOfRangeException"></exception>
+        public static Address BuildContractAddress(Hash chainId, ulong serialNumber)
+        {
+            var hash = Hash.FromTwoHashes(chainId, Hash.FromRawBytes(serialNumber.ToBytes()));
+            return Address.FromBytes(Address.TakeByAddressLength(hash.DumpByteArray()));
+        }
+
+        public static Address BuildContractAddress(int chainId, ulong serialNumber)
+        {
+            return BuildContractAddress(chainId.ComputeHash(), serialNumber);
+        }
     }
 }

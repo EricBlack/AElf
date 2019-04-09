@@ -1,61 +1,79 @@
+using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Threading.Tasks;
 using AElf.Common;
-using AElf.Contracts.Genesis;
-using AElf.Database;
+using AElf.Cryptography;
 using AElf.Kernel;
-using AElf.Kernel.Blockchain.Application;
-using AElf.Kernel.Infrastructure;
-using AElf.Kernel.SmartContract.Application;
+using AElf.Kernel.Account.Application;
+using AElf.Kernel.Consensus.Application;
+using AElf.Kernel.Consensus.DPoS;
 using AElf.Modularity;
+using AElf.OS;
+using AElf.OS.Network.Application;
+using AElf.OS.Network.Infrastructure;
 using AElf.Runtime.CSharp;
-using Google.Protobuf;
+using AElf.Runtime.CSharp.ExecutiveTokenPlugin;
 using Microsoft.Extensions.DependencyInjection;
-using Volo.Abp;
+using Moq;
 using Volo.Abp.Modularity;
 
 namespace AElf.Contracts.TestBase
 {
+    [Obsolete("Deprecated. Use AElf.Contracts.TestKit for contract testing.")]
     [DependsOn(
         typeof(CSharpRuntimeAElfModule),
-        typeof(DatabaseAElfModule),
-        typeof(KernelAElfModule)
+        typeof(CoreOSAElfModule),
+        typeof(KernelTestAElfModule)
     )]
     public class ContractTestAElfModule : AElfModule
     {
-        public override void PreConfigureServices(ServiceConfigurationContext context)
-        {
-            context.Services.AddTransient<ITransactionResultService, NoBranchTransactionResultService>();
-            context.Services.AddTransient<ITransactionResultQueryService, NoBranchTransactionResultService>();
-        }
-
         public override void ConfigureServices(ServiceConfigurationContext context)
         {
-            context.Services.AddAssemblyOf<ContractTestAElfModule>();
+            var services = context.Services;
+            services.AddSingleton(o => Mock.Of<IAElfNetworkServer>());
+            services.AddSingleton(o => Mock.Of<IPeerPool>());
 
-            context.Services.AddKeyValueDbContext<BlockchainKeyValueDbContext>(o => o.UseInMemoryDatabase());
-            context.Services.AddKeyValueDbContext<StateKeyValueDbContext>(o => o.UseInMemoryDatabase());
-        }
+            services.AddSingleton(o => Mock.Of<INetworkService>());
+            
+            // When testing contract and packaging transactions, no need to generate and schedule real consensus stuff.
+            context.Services.AddSingleton(o => Mock.Of<IConsensusInformationGenerationService>());
+            context.Services.AddSingleton(o => Mock.Of<IConsensusScheduler>());
+            
+            Configure<ChainOptions>(o => { o.ChainId = ChainHelpers.ConvertBase58ToChainId("AELF"); });
 
-        public override void PostConfigureServices(ServiceConfigurationContext context)
-        {
-            context.Services.RemoveAll(x =>
-                (x.ServiceType == typeof(ITransactionResultService) ||
-                 x.ServiceType == typeof(ITransactionResultQueryService)) &&
-                x.ImplementationType != typeof(NoBranchTransactionResultService));
-        }
+            var ecKeyPair = CryptoHelpers.GenerateKeyPair();
 
-        public override void OnPreApplicationInitialization(ApplicationInitializationContext context)
-        {
-            var contractZero = typeof(BasicContractZero);
-            var code = File.ReadAllBytes(contractZero.Assembly.Location);
-            var provider = context.ServiceProvider.GetService<IDefaultContractZeroCodeProvider>();
-            provider.DefaultContractZeroRegistration = new SmartContractRegistration
+            context.Services.AddTransient(o =>
             {
-                Category = 2,
-                Code = ByteString.CopyFrom(code),
-                CodeHash = Hash.FromRawBytes(code)
-            };
+                var mockService = new Mock<IAccountService>();
+                mockService.Setup(a => a.SignAsync(It.IsAny<byte[]>())).Returns<byte[]>(data =>
+                    Task.FromResult(CryptoHelpers.SignWithPrivateKey(ecKeyPair.PrivateKey, data)));
+                
+                mockService.Setup(a => a.VerifySignatureAsync(It.IsAny<byte[]>(), It.IsAny<byte[]>(), It.IsAny<byte[]>()
+                )).Returns<byte[], byte[], byte[]>((signature, data, publicKey) =>
+                {
+                    var recoverResult = CryptoHelpers.RecoverPublicKey(signature, data, out var recoverPublicKey);
+                    return Task.FromResult(recoverResult && publicKey.BytesEqual(recoverPublicKey));
+                });
+
+                mockService.Setup(a => a.GetPublicKeyAsync()).ReturnsAsync(ecKeyPair.PublicKey);
+                
+                return mockService.Object;
+            });
+            
+            Configure<DPoSOptions>(o => 
+            {
+                var miners = new List<string>();
+                for (var i = 0; i < 3; i++)
+                {
+                    miners.Add(CryptoHelpers.GenerateKeyPair().PublicKey.ToHex());
+                }
+
+                o.InitialMiners = miners;
+                o.MiningInterval = 4000;
+                o.IsBootMiner = true;
+                o.StartTimestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+            });
         }
     }
 }

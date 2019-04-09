@@ -1,49 +1,42 @@
-using System;
 using System.Linq;
 using System.Threading.Tasks;
-using AElf.Common;
 using AElf.Kernel;
 using AElf.Kernel.Blockchain.Application;
-using AElf.Kernel.Blockchain.Domain;
+using Google.Protobuf;
+using Microsoft.Extensions.Logging;
+using Volo.Abp.DependencyInjection;
 
 namespace AElf.CrossChain
 {
     public class CrossChainBlockExtraDataProvider : IBlockExtraDataProvider
     {
-        private readonly ITransactionResultQueryService _transactionResultQueryService;
+        private readonly ICrossChainService _crossChainService;
 
-        public CrossChainBlockExtraDataProvider(ITransactionResultQueryService transactionResultQueryService)
+        public ILogger<CrossChainBlockExtraDataProvider> Logger { get; set; }
+
+        public CrossChainBlockExtraDataProvider(ICrossChainService crossChainService)
         {
-            _transactionResultQueryService = transactionResultQueryService;
+            _crossChainService = crossChainService;
         }
 
-        public async Task FillExtraDataAsync(Block block)
+        public async Task<ByteString> GetExtraDataForFillingBlockHeaderAsync(BlockHeader blockHeader)
         {
-            if (!CrossChainEventHelper.TryGetLogEventInBlock(block, out var interestedLogEvent))
-                return;
-            try
-            {
-                foreach (var txId in block.Body.Transactions)
-                {
-                    var res = await _transactionResultQueryService.GetTransactionResultAsync(txId);
-                    
-                    var sideChainTransactionsRoot =
-                        CrossChainEventHelper.TryGetValidateCrossChainBlockData(res, block, interestedLogEvent, out _);
-                    if(sideChainTransactionsRoot == null)
-                        continue;
-                    if (block.Header.BlockExtraData == null)
-                    {
-                        block.Header.BlockExtraData = new BlockExtraData();
-                    }
-                    block.Header.BlockExtraData.SideChainTransactionsRoot = sideChainTransactionsRoot;
-                    return;
-                }
-            }
-            catch (Exception)
-            {
-                // ignored
-                // Deserialization/NULL value errors
-            }
+            if (blockHeader.Height == KernelConstants.GenesisBlockHeight)
+                return ByteString.Empty;
+
+            //Logger.LogTrace($"Get new cross chain data with hash {blockHeader.PreviousBlockHash}, height {blockHeader.Height - 1}");
+
+            var newCrossChainBlockData =
+                await _crossChainService.GetNewCrossChainBlockDataAsync(blockHeader.PreviousBlockHash,
+                    blockHeader.Height - 1);
+            if (newCrossChainBlockData == null || newCrossChainBlockData.SideChainBlockData.Count == 0)
+                return ByteString.Empty;
+            
+            var txRootHashList = newCrossChainBlockData.SideChainBlockData.Select(scb => scb.TransactionMerkleTreeRoot);
+            var calculatedSideChainTransactionsRoot = new BinaryMerkleTree().AddNodes(txRootHashList).ComputeRootHash();
+
+            return new CrossChainExtraData {SideChainTransactionsRoot = calculatedSideChainTransactionsRoot}
+                .ToByteString();
         }
     }
 }

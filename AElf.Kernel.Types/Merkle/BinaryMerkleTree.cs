@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using AElf.Common;
+using Google.Protobuf;
 
 namespace AElf.Kernel
 {
@@ -61,7 +62,7 @@ namespace AElf.Kernel
                 return Root;
             if (Nodes.Count == 0)
             {
-                Root = Hash.Zero;
+                Root = Hash.Empty;
                 return Root;
             }
             LeafCount = Nodes.Count;
@@ -74,7 +75,7 @@ namespace AElf.Kernel
             {
                 var left = Nodes[i++];
                 var right = Nodes[i++];
-                Nodes.Add(Hash.FromTwoHashes(left, right));
+                Nodes.Add(CalculateRootFromMultiHash(new []{left, right}));
                 if (++newAdded != nodeToAdd) 
                     continue;
                 
@@ -127,6 +128,14 @@ namespace AElf.Kernel
             var res = new MerklePath();
             res.Path.AddRange(path);
             return res;
+        }
+
+        public static Hash CalculateRootFromMultiHash(IEnumerable<Hash> hashList)
+        {
+            var res = hashList.OrderBy(b => b).Select(h => h.DumpByteArray())
+                .Aggregate(new byte[0], (rawBytes, bytes) => rawBytes.Concat(bytes).ToArray());
+            
+            return Hash.FromRawBytes(res);
         }
     }
 }

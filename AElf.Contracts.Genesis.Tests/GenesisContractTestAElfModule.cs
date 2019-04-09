@@ -1,23 +1,12 @@
-using AElf.Contracts.TestBase;
-using AElf.Database;
-using AElf.Kernel.Infrastructure;
-using AElf.Modularity;
-using Microsoft.Extensions.DependencyInjection;
+using AElf.Contracts.TestKit;
 using Volo.Abp.Modularity;
 
 namespace AElf.Contracts.Genesis
 {
     [DependsOn(
-        typeof(ContractTestAElfModule)
+        typeof(ContractTestModule)
     )]
-    public class BasicContractZeroTestAElfModule : AElfModule
+    public class BasicContractZeroTestAElfModule : ContractTestModule
     {
-        public override void ConfigureServices(ServiceConfigurationContext context)
-        {
-            context.Services.AddAssemblyOf<BasicContractZeroTestAElfModule>();
-
-            context.Services.AddKeyValueDbContext<BlockchainKeyValueDbContext>(o => o.UseInMemoryDatabase());
-            context.Services.AddKeyValueDbContext<StateKeyValueDbContext>(o => o.UseInMemoryDatabase());
-        }
     }
 }

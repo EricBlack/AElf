@@ -5,12 +5,12 @@ using AElf.Common;
 using AElf.Kernel.Infrastructure;
 using AElf.Kernel.SmartContract.Infrastructure;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Options;
 using Volo.Abp.DependencyInjection;
 
 namespace AElf.Kernel.SmartContract.Domain
 {
-
     public interface IBlockchainStateManager
     {
         //Task<VersionedState> GetVersionedStateAsync(Hash blockHash,long blockHeight, string key);
@@ -23,14 +23,14 @@ namespace AElf.Kernel.SmartContract.Domain
     public class BlockchainStateManager : IBlockchainStateManager, ITransientDependency
     {
         private readonly IStateStore<VersionedState> _versionedStates;
-        private readonly IStateStore<BlockStateSet> _blockStateSets;
-
+        private readonly INotModifiedCachedStateStore<BlockStateSet> _blockStateSets;
         private readonly IStateStore<ChainStateInfo> _chainStateInfoCollection;
 
         private readonly int _chainId;
 
         public BlockchainStateManager(IStateStore<VersionedState> versionedStates,
-            IStateStore<BlockStateSet> blockStateSets, IStateStore<ChainStateInfo> chainStateInfoCollection,
+            INotModifiedCachedStateStore<BlockStateSet> blockStateSets,
+            IStateStore<ChainStateInfo> chainStateInfoCollection,
             IOptionsSnapshot<ChainOptions> options)
         {
             _versionedStates = versionedStates;
@@ -70,7 +70,7 @@ namespace AElf.Kernel.SmartContract.Domain
                     else
                     {
                         //find value in block state set
-                        var blockStateKey = blockHash.ToHex();
+                        var blockStateKey = blockHash.ToStorageKey();
                         var blockStateSet = await _blockStateSets.GetAsync(blockStateKey);
                         while (blockStateSet != null && blockStateSet.BlockHeight > bestChainState.BlockHeight)
                         {
@@ -80,7 +80,7 @@ namespace AElf.Kernel.SmartContract.Domain
                                 break;
                             }
 
-                            blockStateKey = blockStateSet.PreviousHash?.ToHex();
+                            blockStateKey = blockStateSet.PreviousHash?.ToStorageKey();
 
                             if (blockStateKey != null)
                             {
@@ -104,7 +104,7 @@ namespace AElf.Kernel.SmartContract.Domain
             else
             {
                 //best chain state is null, it will find value in block state set
-                var blockStateKey = blockHash.ToHex();
+                var blockStateKey = blockHash.ToStorageKey();
                 var blockStateSet = await _blockStateSets.GetAsync(blockStateKey);
                 while (blockStateSet != null)
                 {
@@ -114,7 +114,7 @@ namespace AElf.Kernel.SmartContract.Domain
                         break;
                     }
 
-                    blockStateKey = blockStateSet.PreviousHash?.ToHex();
+                    blockStateKey = blockStateSet.PreviousHash?.ToStorageKey();
 
                     if (blockStateKey != null)
                     {
@@ -155,11 +155,6 @@ namespace AElf.Kernel.SmartContract.Domain
 
             if (chainStateInfo.BlockHash == null || chainStateInfo.BlockHash == blockState.PreviousHash)
             {
-                if (chainStateInfo.Status != ChainStateMergingStatus.Common)
-                {
-                    throw new InvalidOperationException("another merging");
-                }
-
                 chainStateInfo.Status = ChainStateMergingStatus.Merging;
                 chainStateInfo.MergingBlockHash = blockStateHash;
 

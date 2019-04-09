@@ -1,21 +1,19 @@
 using System.Threading.Tasks;
 using AElf.Common;
-using AElf.Kernel.Account;
-using AElf.Kernel.Account.Application;
 using Microsoft.Extensions.Options;
 using Xunit;
 
-namespace AElf.OS.Tests.Account
+namespace AElf.OS.Account
 {
     public class AccountServiceTests : OSTestBase
     {
         private readonly AccountOptions _accountOptions;
-        private readonly IAccountService _accountService;
-        
+        private readonly AccountService _accountService;
+
         public AccountServiceTests()
         {
             _accountOptions = GetRequiredService<IOptionsSnapshot<AccountOptions>>().Value;
-            _accountService = GetRequiredService<IAccountService>();
+            _accountService = GetRequiredService<AccountService>();
         }
 
         [Fact]
@@ -25,7 +23,7 @@ namespace AElf.OS.Tests.Account
 
             Assert.Equal(Address.FromPublicKey(publicKey).GetFormatted(), _accountOptions.NodeAccount);
         }
-        
+
         [Fact]
         public async Task GetAccountTest()
         {
@@ -42,7 +40,7 @@ namespace AElf.OS.Tests.Account
             var signature = await _accountService.SignAsync(data);
             var publicKey = await _accountService.GetPublicKeyAsync();
             var verifyResult = await _accountService.VerifySignatureAsync(signature, data, publicKey);
-            
+
             Assert.True(verifyResult);
         }
 
@@ -55,7 +53,7 @@ namespace AElf.OS.Tests.Account
             var signature = await _accountService.SignAsync(data1);
             var publicKey = await _accountService.GetPublicKeyAsync();
             var verifyResult = await _accountService.VerifySignatureAsync(signature, data2, publicKey);
-            
+
             Assert.False(verifyResult);
         }
     }

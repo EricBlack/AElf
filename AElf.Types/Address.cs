@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Google.Protobuf;
 
-[assembly: InternalsVisibleTo("AElf.Kernel.Tests")]
+[assembly: InternalsVisibleTo("AElf.Kernel.Core.Tests")]
 [assembly: InternalsVisibleTo("AElf.Contracts.SideChain.Tests")]
 [assembly: InternalsVisibleTo("AElf.Contracts.Authorization.Tests")]
 
@@ -35,25 +35,8 @@ namespace AElf.Common
 
         public static Address FromPublicKey(byte[] bytes)
         {
-            var hash = TakeByAddressLength(SHA256.Create().ComputeHash(SHA256.Create().ComputeHash(bytes)));
+            var hash = TakeByAddressLength(bytes.CalculateHash().CalculateHash());
             return new Address(hash);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="contractName"></param>
-        /// <returns></returns>
-        /// <exception cref="ArgumentOutOfRangeException"></exception>
-        public static Address BuildContractAddress(Hash chainId, ulong serialNumber)
-        {
-            var hash = Hash.FromTwoHashes(chainId, Hash.FromRawBytes(serialNumber.ToBytes()));
-            return new Address(TakeByAddressLength(hash.DumpByteArray()));
-        }
-
-        public static Address BuildContractAddress(int chainId, ulong serialNumber)
-        {
-            return BuildContractAddress(chainId.ComputeHash(), serialNumber);
         }
 
 
@@ -69,6 +52,7 @@ namespace AElf.Common
             return new Address(TakeByAddressLength(name.CalculateHash()));
         }
 
+        //TODO: move to test project
         /// <summary>
         /// Only used in tests to generate random addresses.
         /// </summary>

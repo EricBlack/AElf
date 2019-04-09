@@ -7,7 +7,7 @@ using Xunit;
 
 namespace AElf.Kernel.SmartContract.Application
 {
-    public class SmartContractServiceTests : SmartContractTestBase
+    public class SmartContractServiceTests : SmartContractRunnerTestBase
     {
         private readonly SmartContractService _smartContractService;
 
@@ -21,13 +21,13 @@ namespace AElf.Kernel.SmartContract.Application
         {
             var registration = new SmartContractRegistration
             {
-                Category = 2,
+                Category = KernelConstants.DefaultRunnerCategory,
                 Code = Hash.FromString("TestDeployContract").ToByteString(),
                 CodeHash = Hash.FromString("TestDeployContract")
             };
 
 
-            await _smartContractService.DeployContractAsync(Address.Genesis, registration, false);
+            await _smartContractService.DeployContractAsync(Address.Genesis, registration, false, null);
 
         }
 
@@ -36,30 +36,30 @@ namespace AElf.Kernel.SmartContract.Application
         {
             var registrationA = new SmartContractRegistration
             {
-                Category = 2,
+                Category = KernelConstants.DefaultRunnerCategory,
                 Code = Hash.FromString("TestContractA").ToByteString(),
                 CodeHash = Hash.FromString("TestContractA")
             };
 
             var registrationANew = new SmartContractRegistration
             {
-                Category = 2,
+                Category = KernelConstants.DefaultRunnerCategory,
                 Code = Hash.FromString("TestContractA_New").ToByteString(),
                 CodeHash = Hash.FromString("TestContractA")
             };
 
             var registrationB = new SmartContractRegistration
             {
-                Category = 2,
+                Category = KernelConstants.DefaultRunnerCategory,
                 Code = Hash.FromString("TestContractB").ToByteString(),
                 CodeHash = Hash.FromString("TestContractB")
             };
 
-            await _smartContractService.DeployContractAsync(Address.Genesis, registrationA, false);
-            await _smartContractService.UpdateContractAsync(Address.Genesis, registrationANew, false);
+            await _smartContractService.DeployContractAsync(Address.Genesis, registrationA, false, null);
+            await _smartContractService.UpdateContractAsync(Address.Genesis, registrationANew, false, null);
 
 
-            await _smartContractService.UpdateContractAsync(Address.Genesis, registrationB, false);
+            await _smartContractService.UpdateContractAsync(Address.Genesis, registrationB, false, null);
 
         }
     }

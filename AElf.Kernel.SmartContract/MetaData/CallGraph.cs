@@ -3,7 +3,6 @@ using System.Linq;
 using Google.Protobuf.Collections;
 using QuickGraph;
 
-
 namespace AElf.Kernel.SmartContract.MetaData
 {
     public class CallGraph : AdjacencyGraph<string, Edge<string>>, IEquatable<CallGraph>

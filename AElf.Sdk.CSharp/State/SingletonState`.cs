@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using AElf.Kernel;
 using AElf.Kernel.SmartContract;
+using AElf.Kernel.SmartContract.Sdk;
 using Google.Protobuf;
 
 namespace AElf.Sdk.CSharp.State
@@ -60,7 +61,7 @@ namespace AElf.Sdk.CSharp.State
             var stateSet = new TransactionExecutingStateSet();
             if (!Equals(_originalValue, _value))
             {
-                stateSet.Writes[Path.ToStateKey()] = ByteString.CopyFrom(SerializationHelper.Serialize(_value));
+                stateSet.Writes[Path.ToStateKey(Context.Self)] = ByteString.CopyFrom(SerializationHelper.Serialize(_value));
             }
 
             return stateSet;
@@ -70,13 +71,8 @@ namespace AElf.Sdk.CSharp.State
         {
             var bytes = Provider.GetAsync(Path).Result;
             _originalValue = SerializationHelper.Deserialize<TEntity>(bytes);
-            _value = _originalValue;
+            _value = SerializationHelper.Deserialize<TEntity>(bytes);
             Loaded = true;
-        }
-
-        private void UpdateToCache(TEntity value)
-        {
-            Provider.Cache[Path] = SerializationHelper.Serialize(value);
         }
     }
 }

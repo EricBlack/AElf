@@ -5,7 +5,6 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Xunit;
 using AElf.Common;
-using Google.Protobuf.Collections;
 using Shouldly;
 
 namespace AElf.Kernel.Types.Tests
@@ -26,6 +25,10 @@ namespace AElf.Kernel.Types.Tests
 
             var hashByte = blockHeader.GetHashBytes();
             hashByte.ShouldNotBe(null);
+
+            var hash1 = blockHeader.GetHashWithoutCache();
+            hash1.ShouldNotBeNull();
+            hash1.ShouldBe(hash);
         }
 
         [Fact]
@@ -53,14 +56,42 @@ namespace AElf.Kernel.Types.Tests
         }
 
         [Fact]
+        public void BlockIndex_Test()
+        {
+            var blockIndex = new BlockIndex();
+            blockIndex.Hash = Hash.Empty;
+            blockIndex.Height = 1L;
+            
+            var blockIndex1 = new BlockIndex(Hash.Empty, 1L);
+            
+            blockIndex.ToString().ShouldBe(blockIndex1.ToString());
+            blockIndex.ToString().Contains(Hash.Empty.ToString()).ShouldBeTrue();
+            blockIndex.ToString().Contains("1").ShouldBeTrue();
+        }
+
+        [Fact]
+        public void BlockBody_Hash_Test()
+        {
+            var block = CreateBlock(Hash.Generate(), 0, 10);
+            var hash = block.Body.GetHashWithoutCache();
+            hash.ShouldNotBeNull();
+
+            var hash1 = block.Body.GetHashWithoutCache();
+            hash.ShouldNotBeNull();
+            hash.ShouldBe(hash1);
+        }
+        
+        [Fact]
         public void BlockTest()
         {
             var block = CreateBlock(Hash.Generate(), 1234, 10);
             block.Height.ShouldBe(10u);
-            block.BlockHashToHex.ShouldNotBe(string.Empty);
 
             var hash = block.GetHash();
             hash.ShouldNotBe(null);
+
+            var hash1 = block.GetHashWithoutCache();
+            hash.ShouldBe(hash1);
 
             var hashBytes = block.GetHashBytes();
             hashBytes.ShouldNotBe(null);
@@ -70,9 +101,32 @@ namespace AElf.Kernel.Types.Tests
             serializeData.ShouldNotBe(null);
         }
 
+        [Fact]
+        public void Get_BlockHash()
+        {
+            var blockHeader = new BlockHeader
+            {
+                ChainId = 2111,
+                Height = 10,
+                PreviousBlockHash = Hash.Generate(),
+                MerkleTreeRootOfTransactions = Hash.Generate(),
+                MerkleTreeRootOfWorldState = Hash.Generate(),
+                Bloom = ByteString.Empty,
+                BlockExtraDatas = { ByteString.CopyFromUtf8("test")}
+            };
+            var hash = blockHeader.GetHash();
+            hash.ShouldNotBeNull();   
+            
+            var hashBytes = blockHeader.GetHashBytes();
+            hashBytes.Length.ShouldBe(32);
+
+            var hash1 = Hash.LoadByteArray(hashBytes);
+            hash.ShouldBe(hash1);
+        }
+        
         private Block CreateBlock(Hash preBlockHash, int chainId, long height)
         {
-            Interlocked.CompareExchange(ref preBlockHash, Hash.Genesis, null);
+            Interlocked.CompareExchange(ref preBlockHash, Hash.Empty, null);
 
             var block = new Block(Hash.Generate());
 
@@ -80,9 +134,10 @@ namespace AElf.Kernel.Types.Tests
             block.Header.ChainId = chainId;
             block.Header.Time = Timestamp.FromDateTime(DateTime.UtcNow);
             block.Header.Height = height;
-            block.Header.MerkleTreeRootOfWorldState = Hash.Default;
+            block.Header.MerkleTreeRootOfWorldState = Hash.Empty;
 
             block.Body.BlockHeader = block.Header.GetHash();
+            block.Body.BinaryMerkleTree.Root = Hash.Empty;
             var transactionItems = GenerateFakeTransactions(3);
             block.Body.TransactionList.AddRange(transactionItems.Item1);
             block.Body.Transactions.AddRange(transactionItems.Item2);
@@ -90,13 +145,13 @@ namespace AElf.Kernel.Types.Tests
             return block;
         }
 
-        private (List<Transaction>, List<Hash>) GenerateFakeTransactions(int count)
+        private (List<Kernel.Transaction>, List<Hash>) GenerateFakeTransactions(int count)
         {
-            var transactions = new List<Transaction>();
+            var transactions = new List<Kernel.Transaction>();
             var transactionHashes = new List<Hash>();
             for (int i = 0; i < count; i++)
             {
-               var transaction = new Transaction()
+               var transaction = new Kernel.Transaction()
                {
                    From = Address.Generate(),
                    To = Address.Generate(),

@@ -3,9 +3,9 @@ using AElf.Common;
 
 namespace AElf.Kernel
 {
-    public partial class StatePath
+    public partial class StatePath 
     {
-        public Hash GetHash()
+        /*public Hash GetHash()
         {
             if (Path == null)
             {
@@ -13,6 +13,6 @@ namespace AElf.Kernel
             }
 
             return Hash.FromMessage(this);
-        }
+        }*/
     }
 }

@@ -29,6 +29,7 @@ namespace AElf.Kernel.SmartContract
 
         bool IEquatable<FunctionMetadata>.Equals(FunctionMetadata other)
         {
+            if (other == null) return false;
             return HashSet<string>.CreateSetComparer().Equals(CallingSet, other.CallingSet) &&
                    HashSet<Resource>.CreateSetComparer().Equals(FullResourceSet, other.FullResourceSet);
         }

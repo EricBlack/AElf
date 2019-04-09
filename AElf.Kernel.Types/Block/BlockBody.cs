@@ -20,11 +20,17 @@ namespace AElf.Kernel
             }.Aggregate(Hash.FromTwoHashes);
             return _blockBodyHash;
         }
-        
+
         /// <inheritdoc/>
         public Hash GetHash()
         {
             return _blockBodyHash ?? CalculateBodyHash();
+        }
+
+        public Hash GetHashWithoutCache()
+        {
+            _blockBodyHash = null;
+            return GetHash();
         }
     }
 }

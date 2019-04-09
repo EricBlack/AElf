@@ -33,9 +33,9 @@ namespace AElf.Cryptography.Tests.Certificate
         public void Certificate_Verification()
         {
             var keyPair = _certStore.WriteKeyAndCertificate("aelf", "192.168.197.39");
-            var certificate = _certStore.GetCertificate("aelf");
+            var certificate = _certStore.LoadCertificate("aelf");
             certificate.ShouldNotBe(string.Empty);
-            var privateKey = _certStore.GetPrivateKey("aelf");
+            var privateKey = _certStore.LoadKeyStore("aelf");
             privateKey.ShouldNotBe(null);
             privateKey.ShouldNotBe(string.Empty);
 
@@ -47,6 +47,33 @@ namespace AElf.Cryptography.Tests.Certificate
             }
 
             Directory.Delete(Path.Combine(TempDir, "certs"), true);
+        }
+
+        [Fact]
+        public void Add_Certificate()
+        {
+            var name = "testCertificate";
+            var certificateContent = "test information about certificate.";
+            var result = _certStore.AddCertificate(name, certificateContent);
+            result.ShouldBeTrue();
+
+            var certificateContent1 = _certStore.LoadCertificate(name);
+            certificateContent1.ShouldBe(certificateContent);
+        }
+
+        [Fact]
+        public void Get_EncodedPublicKey()
+        {
+            var generator = new RSAKeyPairGenerator();
+            var rsaKeyPair = generator.Generate();
+            var encodePublicKey = rsaKeyPair.GetEncodedPublicKey();
+            encodePublicKey.ShouldNotBeNull();
+            
+            var rsaKeyPair1 = generator.Generate();
+            var encodePublicKey1 = rsaKeyPair1.GetEncodedPublicKey();
+            encodePublicKey1.ShouldNotBeNull();
+            
+            encodePublicKey.ShouldNotBe(encodePublicKey1);
         }
     }
 }

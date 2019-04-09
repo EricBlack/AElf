@@ -7,7 +7,7 @@ using Xunit;
 
 namespace AElf.Kernel.SmartContract.Infrastructure
 {
-    public class SmartContractRunnerContainerTests : SmartContractTestBase
+    public class SmartContractRunnerContainerTests : SmartContractRunnerTestBase
     {
         private readonly SmartContractRunnerContainer _smartContractRunnerContainer;
 
@@ -19,7 +19,7 @@ namespace AElf.Kernel.SmartContract.Infrastructure
         [Fact]
         public void Get_Runner_ReturnRunner()
         {
-            var runner = _smartContractRunnerContainer.GetRunner(2);
+            var runner = _smartContractRunnerContainer.GetRunner(KernelConstants.DefaultRunnerCategory);
 
             runner.ShouldNotBeNull();
         }

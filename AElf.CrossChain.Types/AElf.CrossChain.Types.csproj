@@ -3,11 +3,9 @@
     <PropertyGroup>
         <TargetFramework>netstandard2.0</TargetFramework>
         <RootNamespace>AElf.CrossChain</RootNamespace>
+        <PackageId>AElf.CrossChain.Types</PackageId>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     </PropertyGroup>
-
-    <ItemGroup>
-        <PackageReference Include="Google.Protobuf" Version="3.6.1" />
-    </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\AElf.Kernel.Types\AElf.Kernel.Types.csproj" />

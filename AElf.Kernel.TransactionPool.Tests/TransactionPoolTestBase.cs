@@ -1,9 +1,14 @@
 ﻿using AElf.TestBase;
-using Volo.Abp.DependencyInjection;
 
-namespace AElf.Kernel.TransactionPool.Tests
+namespace AElf.Kernel.TransactionPool
 {
-    public class TransactionPoolTestBase:AElfIntegratedTest<TransactionPoolAElfModule>
+    public class TransactionPoolTestBase : AElfIntegratedTest<TransactionPoolTestAElfModule>
     {
+
+    }
+    
+    public class TransactionPoolWithChainTestBase : AElfIntegratedTest<TransactionPoolWithChainTestAElfModule>
+    {
+
     }
 }

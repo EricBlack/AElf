@@ -22,34 +22,15 @@ namespace AElf.Kernel.Services
     {
         public ILogger<MinerService> Logger { get; set; }
         private ITxHub _txHub;
-        private readonly ISystemTransactionGenerationService _systemTransactionGenerationService;
-        private readonly IBlockGenerationService _blockGenerationService;
-        private readonly IAccountService _accountService;
-
-        private readonly IBlockchainService _blockchainService;
-        private readonly IBlockExecutingService _blockExecutingService;
-        private readonly IConsensusService _consensusService;
-        private readonly IBlockchainExecutingService _blockchainExecutingService;
-
+        private IMiningService _miningService;
         public ILocalEventBus EventBus { get; set; }
 
         private const float RatioMine = 0.3f;
 
-        public MinerService(IAccountService accountService,
-            IBlockGenerationService blockGenerationService,
-            ISystemTransactionGenerationService systemTransactionGenerationService,
-            IBlockchainService blockchainService, IBlockExecutingService blockExecutingService,
-            IConsensusService consensusService, IBlockchainExecutingService blockchainExecutingService, ITxHub txHub)
+        public MinerService(IMiningService miningService, ITxHub txHub)
         {
-            Logger = NullLogger<MinerService>.Instance;
-            _blockGenerationService = blockGenerationService;
-            _systemTransactionGenerationService = systemTransactionGenerationService;
-            _blockExecutingService = blockExecutingService;
-            _consensusService = consensusService;
-            _blockchainExecutingService = blockchainExecutingService;
+            _miningService = miningService;
             _txHub = txHub;
-            _blockchainService = blockchainService;
-            _accountService = accountService;
 
             EventBus = NullLocalEventBus.Instance;
         }
@@ -59,125 +40,61 @@ namespace AElf.Kernel.Services
         /// Mine process.
         /// </summary>
         /// <returns></returns>
-        public async Task<Block> MineAsync(Hash previousBlockHash, long previousBlockHeight, DateTime time)
+        public async Task<Block> MineAsync(Hash previousBlockHash, long previousBlockHeight, DateTime dateTime,
+            TimeSpan timeSpan)
         {
-            try
+            var executableTransactionSet = await _txHub.GetExecutableTransactionSetAsync();
+            var pending = new List<Transaction>();
+            if (executableTransactionSet.PreviousBlockHash == previousBlockHash)
             {
-                var stopwatch = new Stopwatch();
-                stopwatch.Start();
-                // generate block without txns
-                var block = await GenerateBlock(previousBlockHash, previousBlockHeight);
-
-                var transactions = await GenerateSystemTransactions(previousBlockHash, previousBlockHeight);
-
-                var executableTransactionSet = await _txHub.GetExecutableTransactionSetAsync();
-                var pending = new List<Transaction>();
-                if (executableTransactionSet.PreviousBlockHash == previousBlockHash)
-                {
-                    pending = executableTransactionSet.Transactions;
-                }
-                else
-                {
-                    Logger.LogWarning($"Transaction pool gives transactions to be appended to " +
-                                      $"{executableTransactionSet.PreviousBlockHash} which doesn't match the current " +
-                                      $"best chain hash {previousBlockHash}.");
-                }
-
-                using (var cts = new CancellationTokenSource())
-                {
-                    // Give 400 ms for packing
-                    //cts.CancelAfter(time - DateTime.UtcNow - TimeSpan.FromMilliseconds(400));
-                    block = await _blockExecutingService.ExecuteBlockAsync(block.Header, 
-                        transactions, pending, cts.Token);
-                }
-
-                stopwatch.Stop();
-                Logger.LogInformation($"Generated {{ hash: {block.BlockHashToHex}, " +
-                                      $"height: {block.Header.Height}, " +
-                                      $"previous: {block.Header.PreviousBlockHash}, " +
-                                      $"tx-count: {block.Body.TransactionsCount}," +
-                                      $"duration: {stopwatch.ElapsedMilliseconds} ms. }}");
-                
-                /*DateTime currentBlockTime = block.Header.Time.ToDateTime();
-                var txs = await _txHub.GetReceiptsOfExecutablesAsync();
-                var txGrp = txs.GroupBy(tr => tr.IsSystemTxn).ToDictionary(x => x.Key, x => x.ToList());
-                var traces = new List<TransactionTrace>();
-                if (txGrp.TryGetValue(true, out var sysRcpts))
-                {
-                    var sysTxs = sysRcpts.Select(x => x.Transaction).ToList();
-                    _txFilter.Execute(sysTxs);
-                    Logger.LogTrace($"Start executing {sysTxs.Count} system transactions.");
-                    traces = await ExecuteTransactions(sysTxs, currentBlockTime,true, TransactionType.DposTransaction);
-                    Logger.LogTrace($"Finish executing {sysTxs.Count} system transactions.");
-                }
-                if (txGrp.TryGetValue(false, out var regRcpts))
-                {
-                    var contractZeroAddress = ContractHelpers.GetGenesisBasicContractAddress();
-                    var regTxs = new List<Transaction>();
-                    var contractTxs = new List<Transaction>();
-
-                    foreach (var regRcpt in regRcpts)
-                    {
-                        if (regRcpt.Transaction.To.Equals(contractZeroAddress))
-                        {
-                            contractTxs.Add(regRcpt.Transaction);
-                        }
-                        else
-                        {
-                            regTxs.Add(regRcpt.Transaction);
-                        }
-                    }
-                    
-                    Logger.LogTrace($"Start executing {regTxs.Count} regular transactions.");
-                    traces.AddRange(await ExecuteTransactions(regTxs, currentBlockTime));
-                    Logger.LogTrace($"Finish executing {regTxs.Count} regular transactions.");
-                    
-                    Logger.LogTrace($"Start executing {contractTxs.Count} contract transactions.");
-                    traces.AddRange(await ExecuteTransactions(contractTxs, currentBlockTime,
-                        transactionType: TransactionType.ContractDeployTransaction));
-                    Logger.LogTrace($"Finish executing {contractTxs.Count} contract transactions.");
-                }
-
-                ExtractTransactionResults(traces, out var results);
-
-                // complete block
-                await CompleteBlock(block, results);
-                Logger.LogInformation($"Generated block {block.BlockHashToHex} at height {block.Header.Height} with {block.Body.TransactionsCount} txs.");
-
-                var blockStateSet = new BlockStateSet()
-                {
-                    BlockHash = block.GetHash(),
-                    BlockHeight = block.Header.Height,
-                    PreviousHash = block.Header.PreviousBlockHash
-                };
-                FillBlockStateSet(blockStateSet, traces); 
-                await _blockchainStateManager.SetBlockStateSetAsync(blockStateSet);*/
-
-//                await SignBlockAsync(block);
-                await _blockchainService.AddBlockAsync(block);
-                var chain = await _blockchainService.GetChainAsync();
-                var status = await _blockchainService.AttachBlockToChainAsync(chain, block);
-                await _blockchainExecutingService.ExecuteBlocksAttachedToLongestChain(chain, status);
-
-                await SignBlockAsync(block);
-                // TODO: TxHub needs to be updated when BestChain is found/extended, so maybe the call should be centralized
-                //await _txHub.OnNewBlock(block);
-
-                return block;
+                pending = executableTransactionSet.Transactions;
             }
-            catch (Exception e)
+            else
             {
-                Logger.LogError(e, "Mining failed with exception.");
-                return null;
+                Logger.LogWarning($"Transaction pool gives transactions to be appended to " +
+                                  $"{executableTransactionSet.PreviousBlockHash} which doesn't match the current " +
+                                  $"best chain hash {previousBlockHash}.");
             }
+
+            return await _miningService.MineAsync(previousBlockHash, previousBlockHeight, pending, dateTime, timeSpan);
+        }
+    }
+
+
+    public class MiningService : IMiningService
+    {
+        public ILogger<MiningService> Logger { get; set; }
+        private readonly ISystemTransactionGenerationService _systemTransactionGenerationService;
+        private readonly IBlockGenerationService _blockGenerationService;
+        private readonly IAccountService _accountService;
+
+        private readonly IBlockExecutingService _blockExecutingService;
+
+        public ILocalEventBus EventBus { get; set; }
+
+        public MiningService(IAccountService accountService,
+            IBlockGenerationService blockGenerationService,
+            ISystemTransactionGenerationService systemTransactionGenerationService,
+            IBlockExecutingService blockExecutingService)
+        {
+            Logger = NullLogger<MiningService>.Instance;
+            _blockGenerationService = blockGenerationService;
+            _systemTransactionGenerationService = systemTransactionGenerationService;
+            _blockExecutingService = blockExecutingService;
+            _accountService = accountService;
+
+            EventBus = NullLocalEventBus.Instance;
         }
 
-        private async Task<List<Transaction>> GenerateSystemTransactions(Hash previousBlockHash, long previousBlockHeight)
+        private async Task<List<Transaction>> GenerateSystemTransactions(Hash previousBlockHash,
+            long previousBlockHeight)
         {
             //var previousBlockPrefix = previousBlockHash.Value.Take(4).ToArray();
             var address = Address.FromPublicKey(await _accountService.GetPublicKeyAsync());
 
-            var generatedTxns = _systemTransactionGenerationService.GenerateSystemTransactions(address, previousBlockHeight, previousBlockHash);
+            var generatedTxns =
+                _systemTransactionGenerationService.GenerateSystemTransactions(address, previousBlockHeight,
+                    previousBlockHash);
 
             foreach (var txn in generatedTxns)
             {
@@ -200,13 +117,13 @@ namespace AElf.Kernel.Services
         /// Generate block
         /// </summary>
         /// <returns></returns>
-        private async Task<Block> GenerateBlock(Hash preBlockHash, long preBlockHeight)
+        private async Task<Block> GenerateBlock(Hash preBlockHash, long preBlockHeight, DateTime expectedMiningTime)
         {
             var block = await _blockGenerationService.GenerateBlockBeforeExecutionAsync(new GenerateBlockDto
             {
                 PreviousBlockHash = preBlockHash,
                 PreviousBlockHeight = preBlockHeight,
-                BlockTime = DateTime.UtcNow
+                BlockTime = expectedMiningTime
             });
             return block;
         }
@@ -215,6 +132,32 @@ namespace AElf.Kernel.Services
         {
             var publicKey = await _accountService.GetPublicKeyAsync();
             block.Sign(publicKey, data => _accountService.SignAsync(data));
+        }
+
+        public async Task<Block> MineAsync(Hash previousBlockHash, long previousBlockHeight,
+            List<Transaction> transactions, DateTime blockTime, TimeSpan timeSpan)
+        {
+            var block = await GenerateBlock(previousBlockHash, previousBlockHeight, blockTime);
+            var systemTransactions = await GenerateSystemTransactions(previousBlockHash, previousBlockHeight);
+
+            var pending = transactions;
+
+            using (var cts = new CancellationTokenSource())
+            {
+                cts.CancelAfter(timeSpan);
+                block = await _blockExecutingService.ExecuteBlockAsync(block.Header,
+                    systemTransactions, pending, cts.Token);
+            }
+
+            Logger.LogInformation($"Generated block: {block.ToDiagnosticString()}, " +
+                                  $"previous: {block.Header.PreviousBlockHash}, " +
+                                  $"transactions: {block.Body.TransactionsCount}");
+
+            await SignBlockAsync(block);
+            // TODO: TxHub needs to be updated when BestChain is found/extended, so maybe the call should be centralized
+            //await _txHub.OnNewBlock(block);
+
+            return block;
         }
     }
 }

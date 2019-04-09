@@ -4,42 +4,19 @@ using AElf.Common;
 using AElf.Kernel;
 using AElf.Sdk.CSharp.State;
 using AElf.Kernel.SmartContract;
+using AElf.Kernel.SmartContract.Sdk;
 using Google.Protobuf;
 
 namespace AElf.Sdk.CSharp
 {
     public partial class CSharpSmartContract<TContractState> : CSharpSmartContractAbstract
-        where TContractState : ContractState
     {
-        internal override void SetSmartContractContext(ISmartContractContext smartContractContext)
+
+        public CSharpSmartContract()
         {
-            _context.SmartContractContext = smartContractContext;
+            State = new TContractState();
+            State.Path = new StatePath();;
         }
-
-        internal override void SetTransactionContext(ITransactionContext transactionContext)
-        {
-            _context.TransactionContext = transactionContext;
-            SetContractAddress(transactionContext.Transaction.To);
-            State.Provider.TransactionContext = transactionContext;
-        }
-
-        internal override void SetStateProvider(IStateProvider stateProvider)
-        {
-            State.Provider = stateProvider;
-        }
-
-        internal override void SetContractAddress(Address address)
-        {
-            if (address == null)
-            {
-                throw new Exception($"Input {nameof(address)} is null.");
-            }
-
-            var path = new StatePath();
-            path.Path.Add(ByteString.CopyFromUtf8(address.GetFormatted()));
-            State.Path = path;
-        }
-
         internal override TransactionExecutingStateSet GetChanges()
         {
             return State.GetChanges();
@@ -48,6 +25,14 @@ namespace AElf.Sdk.CSharp
         internal override void Cleanup()
         {
             State.Clear();
+        }
+
+        internal override void InternalInitialize(ISmartContractBridgeContext bridgeContext)
+        {
+            if (Context != null)
+                throw new InvalidOperationException();
+            Context = new CSharpSmartContractContext(bridgeContext);
+            State.Context = Context;
         }
     }
 }

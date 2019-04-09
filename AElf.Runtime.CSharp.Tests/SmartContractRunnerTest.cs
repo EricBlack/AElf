@@ -1,87 +1,55 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using AElf.Common;
-using AElf.Contracts.Token;
+using AElf.Contracts.MultiToken;
 using AElf.Kernel;
 using AElf.Kernel.ABI;
+using AElf.Kernel.SmartContract;
 using AElf.Kernel.SmartContract.Infrastructure;
+using AElf.Runtime.CSharp.Tests.TestContract;
+using AElf.Types.CSharp;
 using Google.Protobuf;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Shouldly;
 using Xunit;
 
 namespace AElf.Runtime.CSharp.Tests
 {
-    public class SmartContractRunnerTest: CSharpRuntimeTestBase
+    public sealed class SmartContractRunnerTest: CSharpRuntimeTestBase
     {
         private ISmartContractRunner Runner { get; set; }
+        private SmartContractRegistration Reg { get; set; }
 
         public SmartContractRunnerTest()
         {
+            var contractCode = File.ReadAllBytes(typeof(TestContract.TestContract).Assembly.Location);
             Runner = GetRequiredService<ISmartContractRunner>();
-        }
-
-        [Fact]
-        public void Get_IExcutive()
-        {
-            var contractCode = File.ReadAllBytes(typeof(TokenContract).Assembly.Location);
-            var reg = new SmartContractRegistration()
+            Reg = new SmartContractRegistration()
             {
-                Category = 2,
+                Category = KernelConstants.DefaultRunnerCategory,
                 Code = ByteString.CopyFrom(contractCode),
                 CodeHash = Hash.FromRawBytes(contractCode)
             };
+        }
 
-            var executive = Runner.RunAsync(reg);
+        [Fact]
+        public async Task Get_IExecutive()
+        {
+            var executive = await Runner.RunAsync(Reg);
             executive.ShouldNotBe(null);
         }
 
         [Fact]
-        public void Get_AbiModule()
+        public void Contract_ExtraMetadata()
         {
-            var contractCode = File.ReadAllBytes(typeof(TokenContract).Assembly.Location);
-            var reg = new SmartContractRegistration()
-            {
-                Category = 2,
-                Code = ByteString.CopyFrom(contractCode),
-                CodeHash = Hash.FromRawBytes(contractCode)
-            };
-
-            var message = Runner.GetAbi(reg) as Module;
-            message.ShouldNotBe(null);
-
-            var eventList = message.Events.Select(o => o.Name).ToList();
-            eventList.Contains("AElf.Contracts.Token.Transferred").ShouldBe(true);
-            eventList.Contains("AElf.Contracts.Token.Approved").ShouldBe(true);
-            eventList.Contains("AElf.Contracts.Token.UnApproved").ShouldBe(true);
-            eventList.Contains("AElf.Contracts.Token.Burned").ShouldBe(true);
-
-            var methodList = message.Methods.Select(o=>o.Name).ToList();
-            methodList.Contains("Initialize").ShouldBe(true);
-            methodList.Contains("Transfer").ShouldBe(true);
-            methodList.Contains("TransferFrom").ShouldBe(true);
-            methodList.Contains("Approve").ShouldBe(true);
-            methodList.Contains("UnApprove").ShouldBe(true);
-            methodList.Contains("Burn").ShouldBe(true);
-            methodList.Contains("Symbol").ShouldBe(true);
-            methodList.Contains("TokenName").ShouldBe(true);
-            methodList.Contains("TotalSupply").ShouldBe(true);
-        }
-
-        [Fact]
-        public void Get_Contract_Type()
-        {
-            var contractCode = File.ReadAllBytes(typeof(TokenContract).Assembly.Location);
-            var reg = new SmartContractRegistration()
-            {
-                Category = 2,
-                Code = ByteString.CopyFrom(contractCode),
-                CodeHash = Hash.FromRawBytes(contractCode)
-            };
-
-            var contractType = Runner.GetContractType(reg);
-            var fullName = contractType.FullName;
-            fullName.ShouldBe("AElf.Contracts.Token.TokenContractState");
+            var contractType = typeof(TestContract.TestContract);
+            var contractMetadataTemplate = Runner.ExtractMetadata(contractType);
+            contractMetadataTemplate.FullName.ShouldBe("AElf.Runtime.CSharp.Tests.TestContract.TestContract");
+            contractMetadataTemplate.ProcessFunctionOrder.Count.ShouldBeGreaterThanOrEqualTo(12);
+            contractMetadataTemplate.ProcessFunctionOrder.Contains("${this}.TestBoolState").ShouldBeTrue();
         }
     }
 }

@@ -5,35 +5,19 @@
     <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\AElf.Contracts.Consensus.DPoS\AElf.Contracts.Consensus.DPoS.csproj" />
+    <ProjectReference Include="..\AElf.Blockchains.MainChain\AElf.Blockchains.MainChain.csproj" />
+    <ProjectReference Include="..\AElf.Blockchains.SideChain\AElf.Blockchains.SideChain.csproj" />
     <None Update="Dockerfile">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <ProjectReference Include="..\AElf.Contracts.Genesis\AElf.Contracts.Genesis.csproj" />
-    <ProjectReference Include="..\AElf.Kernel.Consensus.DPoS\AElf.Kernel.Consensus.DPoS.csproj" />
-    <ProjectReference Include="..\AElf.Kernel.SmartContractExecution\AElf.Kernel.SmartContractExecution.csproj" />
-    <ProjectReference Include="..\AElf.OS.Core\AElf.OS.Core.csproj" />
-    <ProjectReference Include="..\AElf.OS.Network.Grpc\AElf.OS.Network.Grpc.csproj" />
-    <ProjectReference Include="..\AElf.OS.Rpc.ChainController\AElf.OS.Rpc.ChainController.csproj" />
-    <ProjectReference Include="..\AElf.OS.Rpc.Net\AElf.OS.Rpc.Net.csproj" />
-    <ProjectReference Include="..\AElf.OS.Rpc.Wallet\AElf.OS.Rpc.Wallet.csproj" />
+    <ProjectReference Include="..\AElf.Runtime.CSharp.ExecutiveTokenPlugin\AElf.Runtime.CSharp.ExecutiveTokenPlugin.csproj" />
     <ProjectReference Include="..\AElf.Runtime.CSharp\AElf.Runtime.CSharp.csproj" />
     <ProjectReference Include="..\AElf.RuntimeSetup\AElf.RuntimeSetup.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="CommandLineParser" Version="2.4.3" />
-    <PackageReference Include="Volo.Abp.AspNetCore.Mvc" Version="0.14.0" />
-    <PackageReference Include="Volo.Abp.Autofac" Version="0.14.0" />
+    <PackageReference Include="Volo.Abp.AspNetCore.Mvc" Version="0.15.0" />
+    <PackageReference Include="Volo.Abp.Autofac" Version="0.15.0" />
     <PackageReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Remove="netstandard2.0\**" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Remove="netstandard2.0\**" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Remove="netstandard2.0\**" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="appsettings.Development.json">

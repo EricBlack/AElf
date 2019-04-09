@@ -3,15 +3,19 @@
     <PropertyGroup>
         <TargetFramework>netcoreapp2.2</TargetFramework>
         <RootNamespace>AElf.Runtime.CSharp.Core</RootNamespace>
+        <PackageId>AElf.Runtime.CSharp.Core</PackageId>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Google.Protobuf" Version="3.6.1" />
       <PackageReference Include="Mono.Cecil" Version="0.10.3" />
+      <PackageReference Include="Hyperion" Version="0.9.8" />
+
     </ItemGroup>
 
     <ItemGroup>
       <ProjectReference Include="..\AElf.Types.CSharp\AElf.Types.CSharp.csproj" />
     </ItemGroup>
+
 
 </Project>

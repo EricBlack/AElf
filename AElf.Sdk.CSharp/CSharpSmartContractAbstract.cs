@@ -1,16 +1,12 @@
-using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using AElf.Common;
 using AElf.Kernel;
-using AElf.Kernel.SmartContract;
+using AElf.Kernel.SmartContract.Sdk;
 
 namespace AElf.Sdk.CSharp
 {
     public abstract class CSharpSmartContractAbstract : CSharpSmartContract
     {
-        internal abstract void SetSmartContractContext(ISmartContractContext smartContractContext);
-        internal abstract void SetTransactionContext(ITransactionContext transactionContext);
-        internal abstract void SetStateProvider(IStateProvider stateProvider);
-        internal abstract void SetContractAddress(Address address);
         internal abstract TransactionExecutingStateSet GetChanges();
         internal abstract void Cleanup();
 
@@ -18,8 +14,10 @@ namespace AElf.Sdk.CSharp
         {
             if (!asserted)
             {
-                throw new AssertionError(message);
+                throw new AssertionException(message);
             }
         }
+
+        internal abstract void InternalInitialize(ISmartContractBridgeContext bridgeContext);
     }
 }

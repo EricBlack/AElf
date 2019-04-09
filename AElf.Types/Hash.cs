@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,7 +9,7 @@ using Google.Protobuf;
 // ReSharper disable once CheckNamespace
 namespace AElf.Common
 {
-    public partial class Hash : ICustomDiagnosticMessage, IComparable<Hash>
+    public partial class Hash : ICustomDiagnosticMessage, IComparable<Hash>, IEnumerable<byte>
     {
         /// <summary>
         /// Used to override IMessage's default string representation.
@@ -24,8 +25,8 @@ namespace AElf.Common
         {
             if (bytes.Length != TypeConsts.HashByteArrayLength)
             {
-                throw new ArgumentOutOfRangeException(
-                    $"Hash bytes has to be {TypeConsts.HashByteArrayLength} bytes long. The input is {bytes.Length} bytes long.");
+                throw new ArgumentOutOfRangeException($"Hash bytes has to be " +
+                                                      $"{TypeConsts.HashByteArrayLength} bytes long. The input is {bytes.Length} bytes long.");
             }
 
             Value = ByteString.CopyFrom(bytes.ToArray());
@@ -72,6 +73,7 @@ namespace AElf.Common
         /// <returns></returns>
         public static Hash FromTwoHashes(Hash hash1, Hash hash2)
         {
+            
             var hashes = new List<Hash>
             {
                 hash1, hash2
@@ -90,7 +92,6 @@ namespace AElf.Common
             }
         }
 
-
         public static Hash Generate()
         {
             return FromRawBytes(Guid.NewGuid().ToByteArray());
@@ -100,16 +101,7 @@ namespace AElf.Common
 
         #region Predefined
 
-        public static readonly Hash Zero = FromString("AElf");
-
         public static readonly Hash Empty = LoadByteArray(Enumerable.Range(0, 32).Select(x => byte.MinValue).ToArray());
-
-        
-        public static readonly Hash Ones = LoadByteArray(Enumerable.Range(0, 32).Select(x => byte.MaxValue).ToArray());
-
-        public static readonly Hash Default = FromRawBytes(new byte[0]);
-
-        public static readonly Hash Genesis = LoadByteArray(Enumerable.Range(0, 32).Select(x => byte.MinValue).ToArray());
 
         #endregion
 
@@ -210,12 +202,7 @@ namespace AElf.Common
         /// <returns></returns>
         public string ToHex()
         {
-            return Value.ToByteArray().ToHex();
-        }
-
-        public string DumpBase58()
-        {
-            return Value.ToByteArray().ToPlainBase58();
+            return Value.ToHex();
         }
 
         /// <summary>
@@ -226,8 +213,7 @@ namespace AElf.Common
         /// <exception cref="ArgumentOutOfRangeException"></exception>
         public static Hash LoadByteArray(byte[] bytes)
         {
-            //TODO: remove && bytes.Length != 3 && bytes.Length!=4
-            if (bytes.Length != TypeConsts.HashByteArrayLength && bytes.Length != 3 && bytes.Length!=4)
+            if (bytes.Length != TypeConsts.HashByteArrayLength)
             {
                 throw new ArgumentOutOfRangeException(nameof(bytes));
             }
@@ -250,19 +236,22 @@ namespace AElf.Common
             return LoadByteArray(bytes);
         }
 
-        public static Hash LoadBase58(string b58str)
+        public static Hash LoadBase64(string base64)
         {
-            var bytes = b58str.DecodeBase58();
+            var bytes = Convert.FromBase64String(base64);
             return LoadByteArray(bytes);
         }
 
         #endregion Load and dump
-        
-        //TODO: should remove, it's temp solved long to Hash
-        //  User-defined conversion from double to Digit
-        public static implicit operator Hash(int d)
+
+        public IEnumerator<byte> GetEnumerator()
         {
-            return Hash.LoadByteArray(BitConverter.GetBytes(d));
+            return Value.GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return GetEnumerator();
         }
     }
 }

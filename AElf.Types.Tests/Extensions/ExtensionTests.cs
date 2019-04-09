@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using Xunit;
+﻿using Xunit;
 using AElf.Common;
 using Google.Protobuf;
 using Shouldly;
@@ -25,11 +24,6 @@ namespace AElf.Types.Tests.Extensions
 
             var hash1 = hexValue.CalculateHash();
             hash1.ShouldNotBe(null);
-
-            var hash2 = Hash.Generate();
-            var base58String = hash2.DumpBase58();
-            var decodeHashArray = base58String.DecodeBase58();
-            decodeHashArray.ShouldBe(hash2.DumpByteArray());
         }
 
         [Fact]
@@ -48,6 +42,20 @@ namespace AElf.Types.Tests.Extensions
             //hash
             var hash = iNumber.ComputeHash();
             hash.ShouldNotBe(null);
+        }
+
+        [Fact]
+        public void Byte_Extensions_ToPlainBase58_Test()
+        {
+            var emptyByteString = ByteString.Empty;
+            emptyByteString.ToPlainBase58().ShouldBe(string.Empty);
+            
+            var byteString = ByteString.CopyFromUtf8("5ta1yvi2dFEs4V7YLPgwkbnn816xVUvwWyTHPHcfxMVLrLB");
+            byteString.ToPlainBase58().ShouldBe("SmUQnCq4Ffvy8UeR9EEV9DhNVcNaLhGpqFTDZfzdebANJAgngqe8RfT1sqPPqJQ9");
+
+            var bytes = new byte[] {0, 0, 0};
+            byteString = ByteString.CopyFrom(bytes);
+            byteString.ToPlainBase58().ShouldBe("111");
         }
     }
 }

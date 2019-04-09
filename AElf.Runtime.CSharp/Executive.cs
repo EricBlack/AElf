@@ -1,78 +1,78 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using AElf.Common;
 using AElf.Kernel;
-using AElf.Kernel.Types;
-using AElf.Kernel.Types.SmartContract;
-using AElf.Runtime.CSharp.Core.ABI;
+using AElf.Kernel.Infrastructure;
 using AElf.Types.CSharp;
 using Google.Protobuf;
-using Module = AElf.Kernel.ABI.Module;
 using AElf.Kernel.SmartContract;
-using AElf.Kernel.SmartContract.Contexts;
 using AElf.Kernel.SmartContract.Infrastructure;
+using AElf.Kernel.SmartContract.Sdk;
+using AElf.Sdk.CSharp;
+using Google.Protobuf.Reflection;
 
 namespace AElf.Runtime.CSharp
 {
     public class Executive : IExecutive
     {
-        private readonly Module _abi;
-        private MethodsCache _cache;
+        private readonly Assembly _contractAssembly;
+        private readonly Type _contractType;
+        private readonly object _contractInstance;
+        private readonly ReadOnlyDictionary<string, IServerCallHandler> _callHandlers;
+        private readonly IReadOnlyList<ServiceDescriptor> _descriptors;
+        private readonly ServerServiceDefinition _serverServiceDefinition;
 
         private CSharpSmartContractProxy _smartContractProxy;
-        private ISmartContract _smartContract;
-        private ITransactionContext _currentTransactionContext;
-        private ISmartContractContext _currentSmartContractContext;
-        private CachedStateProvider _stateProvider;
-        private int _maxCallDepth = 4;
+        private ITransactionContext CurrentTransactionContext => _hostSmartContractBridgeContext.TransactionContext;
 
-        public Executive(Module abiModule)
+        private IHostSmartContractBridgeContext _hostSmartContractBridgeContext;
+        private readonly IServiceContainer<IExecutivePlugin> _executivePlugins;
+
+        private Type FindContractType(Assembly assembly)
         {
-            _abi = abiModule;
+            var types = assembly.GetTypes();
+            return types.SingleOrDefault(t => typeof(ISmartContract).IsAssignableFrom(t) && !t.IsNested);
         }
 
-        public Hash ContractHash { get; set; }
-
-        public IExecutive SetMaxCallDepth(int maxCallDepth)
+        private Type FindContractBaseType(Assembly assembly)
         {
-            _maxCallDepth = maxCallDepth;
-            return this;
+            var types = assembly.GetTypes();
+            return types.SingleOrDefault(t => typeof(ISmartContract).IsAssignableFrom(t) && t.IsNested);
         }
 
-        public IExecutive SetStateProviderFactory(IStateProviderFactory stateProviderFactory)
+        private Type FindContractContainer(Assembly assembly)
         {
-            _stateProvider = new CachedStateProvider(stateProviderFactory.CreateStateProvider());
-            _smartContractProxy.SetStateProvider(_stateProvider);
-            return this;
+            var contractBase = FindContractBaseType(assembly);
+            return contractBase.DeclaringType;
         }
 
-        public void SetDataCache(IStateCache cache)
+        private ServerServiceDefinition GetServerServiceDefinition(Assembly assembly)
         {
-            _stateProvider.Cache = cache ?? new NullStateCache();
+            var methodInfo = FindContractContainer(assembly).GetMethod("BindService",
+                new[] {FindContractBaseType(assembly)});
+            return methodInfo.Invoke(null, new[] {_contractInstance}) as ServerServiceDefinition;
         }
 
-        public Executive SetSmartContract(ISmartContract smartContract)
+        public Executive(Assembly assembly, IServiceContainer<IExecutivePlugin> executivePlugins)
         {
-            _smartContract = smartContract;
-            _smartContractProxy = new CSharpSmartContractProxy(smartContract);
-            _cache = new MethodsCache(_abi, smartContract);
-            return this;
+            _contractAssembly = assembly;
+            _executivePlugins = executivePlugins;
+            _contractType = FindContractType(assembly);
+            _contractInstance = Activator.CreateInstance(_contractType);
+            _smartContractProxy = new CSharpSmartContractProxy(_contractInstance);
+            _serverServiceDefinition = GetServerServiceDefinition(assembly);
+            _callHandlers = _serverServiceDefinition.GetCallHandlers();
+            _descriptors = _serverServiceDefinition.GetDescriptors();
         }
 
-        public IExecutive SetSmartContractContext(ISmartContractContext smartContractContext)
+        public IExecutive SetHostSmartContractBridgeContext(IHostSmartContractBridgeContext smartContractBridgeContext)
         {
-            _smartContractProxy.SetSmartContractContext(smartContractContext);
-            _currentSmartContractContext = smartContractContext;
-            return this;
-        }
-
-        public IExecutive SetTransactionContext(ITransactionContext transactionContext)
-        {
-            _smartContractProxy.SetTransactionContext(transactionContext);
-            _currentTransactionContext = transactionContext;
+            _hostSmartContractBridgeContext = smartContractBridgeContext;
+            _smartContractProxy.InternalInitialize(_hostSmartContractBridgeContext);
             return this;
         }
 
@@ -81,119 +81,160 @@ namespace AElf.Runtime.CSharp
             _smartContractProxy.Cleanup();
         }
 
-        public async Task Apply()
+        public async Task ApplyAsync(ITransactionContext transactionContext)
         {
-            await ExecuteMainTransaction();
-            MaybeInsertFeeTransaction();
+            try
+            {
+                _hostSmartContractBridgeContext.TransactionContext = transactionContext;
+                if (CurrentTransactionContext.CallDepth > CurrentTransactionContext.MaxCallDepth)
+                {
+                    CurrentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.ExceededMaxCallDepth;
+                    CurrentTransactionContext.Trace.StdErr = "\n" + "ExceededMaxCallDepth";
+                    return;
+                }
+
+                Execute();
+                if (CurrentTransactionContext.CallDepth == 0)
+                {
+                    // Plugin should only apply to top level transaction
+                    foreach (var plugin in _executivePlugins)
+                    {
+                        plugin.PostMain(_hostSmartContractBridgeContext, _serverServiceDefinition);
+                    }
+                }
+            }
+            finally
+            {
+                _hostSmartContractBridgeContext.TransactionContext = null;
+            }
         }
 
-        public void MaybeInsertFeeTransaction()
+        public void Execute()
         {
-            // No insertion of transaction if it's not IFeeChargedContract or it's not top level transaction
-            if (!(_smartContract is IFeeChargedContract) || _currentTransactionContext.CallDepth > 0)
-            {
-                return;
-            }
-
-            _currentTransactionContext.Trace.InlineTransactions.Add(new Transaction()
-            {
-                From = _currentTransactionContext.Transaction.From,
-                To = ContractHelpers.GetTokenContractAddress(_currentSmartContractContext.GetChainId()),
-                MethodName = nameof(ITokenContract.ChargeTransactionFees),
-                Params = ByteString.CopyFrom(
-                    ParamsPacker.Pack(GetFee(_currentTransactionContext.Transaction.MethodName)))
-            });
-        }
-
-        public async Task ExecuteMainTransaction()
-        {
-            if (_currentTransactionContext.CallDepth > _maxCallDepth)
-            {
-                _currentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.ExceededMaxCallDepth;
-                _currentTransactionContext.Trace.StdErr = "\n" + "ExceededMaxCallDepth";
-                return;
-            }
-
-            var s = _currentTransactionContext.Trace.StartTime = DateTime.UtcNow;
-            var methodName = _currentTransactionContext.Transaction.MethodName;
+            var s = CurrentTransactionContext.Trace.StartTime = DateTime.UtcNow;
+            var methodName = CurrentTransactionContext.Transaction.MethodName;
 
             try
             {
-                var methodAbi = _cache.GetMethodAbi(methodName);
-
-                var handler = _cache.GetHandler(methodName);
-                var tx = _currentTransactionContext.Transaction;
-
-                if (handler == null)
+                if (!_callHandlers.TryGetValue(methodName, out var handler))
                 {
-                    throw new RuntimeException($"Failed to find handler for {methodName}.");
+                    throw new RuntimeException(
+                        $"Failed to find handler for {methodName}. We have {_callHandlers.Count} handlers.");
                 }
 
                 try
                 {
-                    var retVal = await handler(tx.Params.ToByteArray());
-                    _currentTransactionContext.Trace.RetVal = retVal;
-                    _currentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.ExecutedAndCommitted;
+                    var tx = CurrentTransactionContext.Transaction;
+                    var retVal = handler.Execute(tx.Params.ToByteArray());
+                    if (retVal != null)
+                    {
+                        CurrentTransactionContext.Trace.ReturnValue = ByteString.CopyFrom(retVal);
+                        CurrentTransactionContext.Trace.ReadableReturnValue = handler.ReturnBytesToString(retVal);
+                    }
+
+                    CurrentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.Executed;
                 }
                 catch (TargetInvocationException ex)
                 {
-                    _currentTransactionContext.Trace.StdErr += ex.InnerException;
-                    _currentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.ContractError;
+                    CurrentTransactionContext.Trace.StdErr += ex.InnerException;
+                    CurrentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.ContractError;
+                }
+                catch (AssertionException ex)
+                {
+                    CurrentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.ContractError;
+                    CurrentTransactionContext.Trace.StdErr += "\n" + ex;
                 }
                 catch (Exception ex)
                 {
-                    _currentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.ContractError;
-                    _currentTransactionContext.Trace.StdErr += "\n" + ex;
+                    CurrentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.ContractError;
+                    CurrentTransactionContext.Trace.StdErr += "\n" + ex;
                 }
 
-                if (!methodAbi.IsView && _currentTransactionContext.Trace.IsSuccessful() &&
-                    _currentTransactionContext.Trace.ExecutionStatus == ExecutionStatus.ExecutedAndCommitted)
+                if (!handler.IsView() && CurrentTransactionContext.Trace.IsSuccessful())
                 {
-                    _currentTransactionContext.Trace.StateSet = _smartContractProxy.GetChanges();
-//                    var changes = _smartContractProxy.GetChanges().Select(kv => new StateChange()
-//                    {
-//                        StatePath = kv.Key,
-//                        StateValue = kv.Value
-//                    });
-//                    _currentTransactionContext.Trace.StateChanges.AddRange(changes);
+                    var changes = _smartContractProxy.GetChanges();
+
+                    var address = _hostSmartContractBridgeContext.Self.ToStorageKey();
+                    foreach (var (key, value) in changes.Writes)
+                    {
+                        if (!key.StartsWith(address))
+                        {
+                            throw new InvalidOperationException("a contract cannot access other contracts data");
+                        }
+                    }
+
+                    foreach (var (key, value) in changes.Reads)
+                    {
+                        if (!key.StartsWith(address))
+                        {
+                            throw new InvalidOperationException("a contract cannot access other contracts data");
+                        }
+                    }
+
+
+                    CurrentTransactionContext.Trace.StateSet = changes;
                 }
                 else
                 {
-                    _currentTransactionContext.Trace.StateSet = new TransactionExecutingStateSet();
+                    CurrentTransactionContext.Trace.StateSet = new TransactionExecutingStateSet();
                 }
             }
             catch (Exception ex)
             {
-                _currentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.SystemError;
-                _currentTransactionContext.Trace.StdErr += ex + "\n";
+                CurrentTransactionContext.Trace.ExecutionStatus = ExecutionStatus.SystemError;
+                CurrentTransactionContext.Trace.StdErr += ex + "\n";
             }
             finally
             {
                 Cleanup();
             }
 
-            var e = _currentTransactionContext.Trace.EndTime = DateTime.UtcNow;
-            _currentTransactionContext.Trace.Elapsed = (e - s).Ticks;
-        }
-
-        public ulong GetFee(string methodName)
-        {
-            var handler = _cache.GetHandler(nameof(IFeeChargedContract.GetMethodFee));
-            var retVal = handler(ParamsPacker.Pack(methodName)).Result;
-            return retVal.Data.DeserializeToUInt64();
+            var e = CurrentTransactionContext.Trace.EndTime = DateTime.UtcNow;
+            CurrentTransactionContext.Trace.Elapsed = (e - s).Ticks;
         }
 
         public string GetJsonStringOfParameters(string methodName, byte[] paramsBytes)
         {
-            // method info 
-            var methodInfo = _smartContract.GetType().GetMethod(methodName);
-            var parameters = ParamsPacker.Unpack(paramsBytes,
-                methodInfo.GetParameters().Select(y => y.ParameterType).ToArray());
-            // get method in abi
-            var method = _cache.GetMethodAbi(methodName);
+            if (!_callHandlers.TryGetValue(methodName, out var handler))
+            {
+                return "";
+            }
 
-            // deserialize
-            return string.Join(",", method.DeserializeParams(parameters));
+            return handler.InputBytesToString(paramsBytes);
+        }
+
+//        public object GetReturnValue(string methodName, byte[] bytes)
+//        {
+//            if (!_callHandlers.TryGetValue(methodName, out var handler))
+//            {
+//                return null;
+//            }
+//
+//            return handler.ReturnBytesToObject(bytes);
+//        }
+
+        private IEnumerable<FileDescriptor> GetSelfAndDependency(FileDescriptor fileDescriptor,
+            HashSet<string> known = null)
+        {
+            known = known ?? new HashSet<string>();
+            if (known.Contains(fileDescriptor.Name))
+            {
+                return new List<FileDescriptor>();
+            }
+
+            var fileDescriptors = new List<FileDescriptor>();
+            fileDescriptors.AddRange(fileDescriptor.Dependencies.SelectMany(x => GetSelfAndDependency(x, known)));
+            fileDescriptors.Add(fileDescriptor);
+            known.Add(fileDescriptor.Name);
+            return fileDescriptors;
+        }
+
+        public byte[] GetFileDescriptorSet()
+        {
+            var descriptor = _descriptors.Last();
+            var output = new FileDescriptorSet();
+            output.File.AddRange(GetSelfAndDependency(descriptor.File).Select(x => x.SerializedData));
+            return output.ToByteArray();
         }
     }
 }

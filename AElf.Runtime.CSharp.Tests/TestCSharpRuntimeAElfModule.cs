@@ -7,7 +7,6 @@ using AElf.Kernel.Infrastructure;
 using AElf.Kernel.SmartContract;
 using AElf.Modularity;
 using AElf.Runtime.CSharp;
-using AElf.Kernel.SmartContract.Contexts;
 using AElf.Kernel.SmartContract.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -21,31 +20,14 @@ using Volo.Abp.Modularity;
 namespace AElf.Runtime.CSharp
 {
     [DependsOn(
-        typeof(ChainControllerAElfModule),
-        typeof(SmartContractAElfModule),
         typeof(CSharpRuntimeAElfModule),
-        typeof(CoreKernelAElfModule)
+        typeof(SmartContractTestAElfModule)
     )]
     public class TestCSharpRuntimeAElfModule : AElfModule
     {
-        public override void PreConfigureServices(ServiceConfigurationContext context)
-        {
-            Configure<RunnerOptions>(o => new RunnerOptions());
-        }
-
         public override void ConfigureServices(ServiceConfigurationContext context)
         {
-            context.Services.AddAssemblyOf<TestCSharpRuntimeAElfModule>();
-
-            context.Services.AddKeyValueDbContext<BlockchainKeyValueDbContext>(o => o.UseInMemoryDatabase());
-            context.Services.AddKeyValueDbContext<StateKeyValueDbContext>(o => o.UseInMemoryDatabase());
-
-            context.Services.AddSingleton<ISmartContractRunner, SmartContractRunnerForCategoryTwo>(provider =>
-            {
-                var option = provider.GetService<IOptions<RunnerOptions>>();
-                return new SmartContractRunnerForCategoryTwo(option.Value.SdkDir, option.Value.BlackList,
-                    option.Value.WhiteList);
-            });
+            
         }
     }
 }

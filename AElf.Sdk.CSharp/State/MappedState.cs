@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.Linq;
 using AElf.Kernel;
 using AElf.Kernel.SmartContract;
+using AElf.Kernel.SmartContract.Sdk;
 using Google.Protobuf;
 
 namespace AElf.Sdk.CSharp.State
@@ -13,7 +14,7 @@ namespace AElf.Sdk.CSharp.State
         internal StatePath GetSubStatePath(string key)
         {
             var statePath = this.Path.Clone();
-            statePath.Path.Add(ByteString.CopyFromUtf8(key));
+            statePath.Parts.Add(key);
             return statePath;
         }
     }
@@ -63,7 +64,7 @@ namespace AElf.Sdk.CSharp.State
             {
                 if (!Equals(kv.Value.OriginalValue, kv.Value.Value))
                 {
-                    var key = GetSubStatePath(kv.Key.ToString()).ToStateKey();
+                    var key = GetSubStatePath(kv.Key.ToString()).ToStateKey(Context.Self);
                     stateSet.Writes[key] = ByteString.CopyFrom(SerializationHelper.Serialize(kv.Value.Value));
                 }
             }
@@ -83,11 +84,6 @@ namespace AElf.Sdk.CSharp.State
                 Value = value
             };
         }
-        private void UpdateToCache(TKey key, TEntity value)
-        {
-            var path = GetSubStatePath(key.ToString());
-            Provider.Cache[path] = SerializationHelper.Serialize(value);
-        }
     }
 
     public class MappedState<TKey1, TKey2, TEntity> : MappedStateBase
@@ -103,13 +99,21 @@ namespace AElf.Sdk.CSharp.State
                 {
                     child = new MappedState<TKey2, TEntity>()
                     {
-                        Provider = this.Provider,
+                        Context = Context,
                         Path = GetSubStatePath(key1.ToString())
                     };
                     Cache[key1] = child;
                 }
 
                 return child;
+            }
+        }
+
+        internal override void OnContextSet()
+        {
+            foreach (var v in Cache.Values)
+            {
+                v.Context = Context;
             }
         }
 
@@ -146,13 +150,21 @@ namespace AElf.Sdk.CSharp.State
                 {
                     child = new MappedState<TKey2, TKey3, TEntity>()
                     {
-                        Provider = this.Provider,
+                        Context = Context,
                         Path = GetSubStatePath(key1.ToString())
                     };
                     Cache[key1] = child;
                 }
 
                 return child;
+            }
+        }
+
+        internal override void OnContextSet()
+        {
+            foreach (var v in Cache.Values)
+            {
+                v.Context = Context;
             }
         }
 
@@ -189,13 +201,21 @@ namespace AElf.Sdk.CSharp.State
                 {
                     child = new MappedState<TKey2, TKey3, TKey4, TEntity>()
                     {
-                        Provider = this.Provider,
+                        Context = Context,
                         Path = GetSubStatePath(key1.ToString())
                     };
                     Cache[key1] = child;
                 }
 
                 return child;
+            }
+        }
+
+        internal override void OnContextSet()
+        {
+            foreach (var v in Cache.Values)
+            {
+                v.Context = Context;
             }
         }
 

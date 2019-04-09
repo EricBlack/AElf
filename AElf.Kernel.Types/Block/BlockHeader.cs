@@ -7,6 +7,11 @@ namespace AElf.Kernel
 {
     public partial class BlockHeader: IBlockHeader
     {
+        partial void OnConstruction()
+        {
+            Bloom = ByteString.CopyFrom(new Bloom().Data);
+        }
+
         private Hash _blockHash;
         
         public BlockHeader(Hash preBlockHash)
@@ -22,6 +27,12 @@ namespace AElf.Kernel
             }
 
             return _blockHash;
+        }
+
+        public Hash GetHashWithoutCache()
+        {
+            _blockHash = null;
+            return GetHash();
         }
 
         public byte[] GetHashBytes()
@@ -42,9 +53,10 @@ namespace AElf.Kernel
                 MerkleTreeRootOfTransactions = MerkleTreeRootOfTransactions?.Clone(),
                 MerkleTreeRootOfWorldState = MerkleTreeRootOfWorldState?.Clone(),
                 Bloom = Bloom,
-                BlockExtraData = BlockExtraData?.Clone()
+                BlockExtraDatas = {BlockExtraDatas}
             };
-            if (Height > ChainConsts.GenesisBlockHeight)
+            // TODO: Remove this judgement.
+            if (Height > KernelConstants.GenesisBlockHeight)
                 rawBlock.Time = Time?.Clone();
 
             return rawBlock.ToByteArray();

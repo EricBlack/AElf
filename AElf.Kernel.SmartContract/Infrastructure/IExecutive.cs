@@ -1,21 +1,18 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using AElf.Common;
-using AElf.Kernel.SmartContract.Contexts;
+using AElf.Kernel.SmartContract.Sdk;
 
 namespace AElf.Kernel.SmartContract.Infrastructure
 {
+    /// <summary>
+    /// An isolated environment for runtime contract code.
+    /// </summary>
     public interface IExecutive
     {
-        Hash ContractHash { get; set; }
-        IExecutive SetMaxCallDepth(int maxCallDepth);
-        IExecutive SetSmartContractContext(ISmartContractContext contractContext);
-        IExecutive SetTransactionContext(ITransactionContext transactionContext);
-        IExecutive SetStateProviderFactory(IStateProviderFactory stateProviderFactory);
-        void SetDataCache(IStateCache cache); //temporary solution to let data provider access actor's state cache
-        Task Apply();
-        ulong GetFee(string methodName);
+        IExecutive SetHostSmartContractBridgeContext(IHostSmartContractBridgeContext smartContractBridgeContext);
+        Task ApplyAsync(ITransactionContext transactionContext);
         string GetJsonStringOfParameters(string methodName, byte[] paramsBytes);
-
+        byte[] GetFileDescriptorSet();
     }
 }
